@@ -1,0 +1,94 @@
+name: Update Daily Close Prices
+
+on:
+  schedule:
+    # 22:00 UTC = หลังตลาดหุ้นสหรัฐฯ ปิดแน่นอน ทั้งช่วง DST และไม่ DST
+    # (ปิดจริง 20:00-21:00 UTC แล้วแต่ฤดูกาล) รันเฉพาะวันจันทร์-ศุกร์ (ตามปฏิทิน UTC)
+    - cron: '0 22 * * 1-5'
+  workflow_dispatch:   # กดรันมือได้จากแท็บ Actions
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - name: ดึงราคาปิดของทุกหุ้นในพอร์ต แล้วบันทึกเข้า Supabase
+        env:
+          SUPABASE_URL: 'https://edfahiauntmidsoviqft.supabase.co'
+          SUPABASE_KEY: 'sb_publishable_u5JVuFHwvad2HSkef-ShZA_50gvcF3m'
+        run: |
+          python3 - << 'PYEOF'
+          import urllib.request, json, datetime, os, time
+
+          SUPABASE_URL = os.environ['SUPABASE_URL']
+          SUPABASE_KEY = os.environ['SUPABASE_KEY']
+
+          def sb_get(path):
+              req = urllib.request.Request(
+                  f'{SUPABASE_URL}/rest/v1/{path}',
+                  headers={'apikey': SUPABASE_KEY, 'Authorization': f'Bearer {SUPABASE_KEY}'}
+              )
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  return json.loads(r.read().decode('utf-8'))
+
+          def sb_post(path, body):
+              data = json.dumps(body).encode('utf-8')
+              req = urllib.request.Request(
+                  f'{SUPABASE_URL}/rest/v1/{path}',
+                  data=data, method='POST',
+                  headers={
+                      'apikey': SUPABASE_KEY,
+                      'Authorization': f'Bearer {SUPABASE_KEY}',
+                      'Content-Type': 'application/json',
+                      'Prefer': 'return=minimal',
+                  }
+              )
+              with urllib.request.urlopen(req, timeout=15) as r:
+                  return r.status
+
+          def fetch_yahoo_price(ticker):
+              url = f'https://query1.finance.yahoo.com/v8/finance/chart/{ticker}'
+              req = urllib.request.Request(url, headers={
+                  'User-Agent': 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36',
+              })
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  d = json.loads(r.read().decode('utf-8'))
+              meta = d['chart']['result'][0]['meta']
+              price = meta.get('regularMarketPrice') or meta.get('previousClose')
+              return round(float(price), 4) if price else None
+
+          today = datetime.date.today().isoformat()
+
+          # ---- 1) ดึงรายชื่อหุ้นทั้งหมดที่ถืออยู่จริงจากตาราง stocks ----
+          stocks = sb_get('stocks?select=ticker')
+          tickers = sorted(set(s['ticker'] for s in stocks if s.get('ticker')))
+          print(f'พบหุ้นในพอร์ต {len(tickers)} ตัว: {tickers}')
+
+          saved, skipped, failed = [], [], []
+
+          for ticker in tickers:
+              try:
+                  # ---- 2) เช็คก่อนว่าวันนี้มีบันทึกราคาของ ticker นี้ไปแล้วหรือยัง (กันซ้ำ) ----
+                  existing = sb_get(f'price_history?ticker=eq.{ticker}&date=eq.{today}&select=id')
+                  if existing:
+                      skipped.append(ticker)
+                      continue
+
+                  # ---- 3) ดึงราคาปิดล่าสุดจาก Yahoo Finance ----
+                  price = fetch_yahoo_price(ticker)
+                  if not price:
+                      failed.append(ticker)
+                      continue
+
+                  # ---- 4) บันทึกเข้า price_history ----
+                  sb_post('price_history', {'ticker': ticker, 'date': today, 'price': price})
+                  saved.append(f'{ticker}={price}')
+                  time.sleep(0.3)  # กันโดน rate limit ของ Yahoo
+              except Exception as e:
+                  print(f'  ❌ {ticker} error: {e}')
+                  failed.append(ticker)
+
+          print(f'✅ บันทึกสำเร็จ ({len(saved)}): {saved}')
+          print(f'⏭️  ข้าม (มีข้อมูลวันนี้แล้ว) ({len(skipped)}): {skipped}')
+          if failed:
+              print(f'❌ ล้มเหลว ({len(failed)}): {failed}')
+          PYEOF

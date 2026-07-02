@@ -211,8 +211,7 @@ function renderSummary() {
 // จะใช้ค่าจริงวันนั้นแทนจุดประมาณการ ส่วนช่วงที่ไม่มีข้อมูลจริงจะ "ประมาณการเติบโต" แบบ compound
 // ระหว่าง 2 จุดจริงที่ใกล้ที่สุด (ไม่ใช่การสุ่ม/Math.random ใด ๆ ทั้งสิ้น)
 let lineChartInst = null;
-const PORTFOLIO_START = '2024-02-01'; // วันที่เริ่มลงทุนจริง (1 ก.พ. 67)
-const PORTFOLIO_START_VALUE_USD = 100; // เงินต้นจริงวันแรก ($100)
+const PORTFOLIO_START = '2024-02-01'; // วันที่เริ่มลงทุนจริง (1 ก.พ. 67) — ใช้เป็นจุดเริ่มแกน x ของกราฟเท่านั้น
 
 function renderLineChart() {
   // อัปเดตปุ่ม (เหลือปุ่มเดียวคือ MAX)
@@ -223,6 +222,8 @@ function renderLineChart() {
   const today = new Date();
   const todayKey = today.toISOString().slice(0, 10);
   const fromDate = new Date(PORTFOLIO_START);
+  // เงินต้นจริง = ต้นทุนรวมของทุกหุ้นที่ถืออยู่ (shares × cost) ไม่ใช่ค่า demo ที่ hardcode ไว้
+  const PORTFOLIO_START_VALUE_USD = stocks.reduce((sum, s) => sum + parseFloat(s.cost) * parseFloat(s.shares), 0);
 
   // สร้างวันเทรดทุกวัน จ-ศ ตั้งแต่วันเริ่มลงทุนจริงถึงวันนี้
   const allDates = [];
@@ -304,7 +305,7 @@ function renderLineChart() {
     const col = pctChange >= 0 ? '#00e5a0' : '#ff4d6d';
     const nRealPoints = realPoints.length;
     infoEl.innerHTML = `MAX: <span style="color:${col};font-weight:700;">${sign}${pctChange}%</span>
-      &nbsp;|&nbsp; เริ่มลงทุนจริง 1 ก.พ. 67 ด้วย $100
+      &nbsp;|&nbsp; ต้นทุนรวม ${fmtCur(PORTFOLIO_START_VALUE_USD)}
       &nbsp;|&nbsp; มูลค่าจริงวันนี้ ${fmtCur(realTodayUSD)}
       &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (จุดสีเทาบนกราฟคือค่าประมาณการระหว่างจุดจริง ไม่ใช่ราคาที่สุ่มขึ้น)`;
   }
@@ -2480,21 +2481,26 @@ async function addWalletTx() {
   const tx = { id: 'w' + Date.now(), type: 'fx_buy', amount, rate, usd, date, note };
   _walletTxs.push(tx);
 
-  try {
-    await sb.from('wallet_transactions').insert({ ...tx });
-  } catch (e) {
+  const { error } = await sb.from('wallet_transactions').insert({ ...tx });
+  if (error) {
+    console.error('[Wallet] Supabase insert error:', error);
     localStorage.setItem('wallet_txs', JSON.stringify(_walletTxs));
+    showToast('⚠️ บันทึกลง Supabase ไม่สำเร็จ (เก็บไว้ในเครื่องชั่วคราว): ' + (error.message || error.code), 'var(--red)');
+  } else {
+    showToast('💱 บันทึกการแลกเงินแล้ว');
   }
 
   ['txAmount', 'txRate', 'txNote'].forEach(id => document.getElementById(id).value = '');
-  showToast('💱 บันทึกการแลกเงินแล้ว');
   renderWalletTab();
 }
 
 async function deleteWalletTx(id) {
   _walletTxs = _walletTxs.filter(t => t.id !== id);
-  try { await sb.from('wallet_transactions').delete().eq('id', id); } catch (e) {
+  const { error } = await sb.from('wallet_transactions').delete().eq('id', id);
+  if (error) {
+    console.error('[Wallet] Supabase delete error:', error);
     localStorage.setItem('wallet_txs', JSON.stringify(_walletTxs));
+    showToast('⚠️ ลบใน Supabase ไม่สำเร็จ: ' + (error.message || error.code), 'var(--red)');
   }
   renderWalletTab();
 }
@@ -3548,8 +3554,12 @@ async function loadGoldFromSB() {
 }
 
 async function saveGoldToSB(entry) {
-  try { await sb.from('gold_entries').upsert({ ...entry }); }
-  catch (e) { localStorage.setItem('gold_entries', JSON.stringify(_goldEntries)); }
+  const { error } = await sb.from('gold_entries').upsert({ ...entry });
+  if (error) {
+    console.error('[Gold] Supabase upsert error:', error);
+    localStorage.setItem('gold_entries', JSON.stringify(_goldEntries));
+    showToast('⚠️ บันทึกทองลง Supabase ไม่สำเร็จ (เก็บไว้ในเครื่องชั่วคราว): ' + (error.message || error.code), 'var(--red)');
+  }
 }
 
 async function initGoldTab() {
@@ -3598,8 +3608,12 @@ async function addGoldEntry() {
 
 async function deleteGoldEntry(id) {
   _goldEntries = _goldEntries.filter(e => e.id !== id);
-  try { await sb.from('gold_entries').delete().eq('id', id); }
-  catch (e) { localStorage.setItem('gold_entries', JSON.stringify(_goldEntries)); }
+  const { error } = await sb.from('gold_entries').delete().eq('id', id);
+  if (error) {
+    console.error('[Gold] Supabase delete error:', error);
+    localStorage.setItem('gold_entries', JSON.stringify(_goldEntries));
+    showToast('⚠️ ลบทองใน Supabase ไม่สำเร็จ: ' + (error.message || error.code), 'var(--red)');
+  }
   renderGoldTab();
 }
 

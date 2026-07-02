@@ -211,6 +211,13 @@
     <input class="search-box" type="text" id="txNote" placeholder="หมายเหตุ (เช่น SCB, Wise)" style="max-width:200px">
     <button class="btn btn-primary" onclick="addWalletTx()">+ บันทึกแลกเงิน</button>
   </div>
+  <div style="margin:0 0 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+    <span style="color:var(--green, #4ade80);font-weight:600;font-size:0.9rem">💵 เงินเข้าอื่นๆ (ปันผล/ดอกเบี้ย)</span>
+    <input class="search-box" type="number" id="divAmount" placeholder="จำนวน USD ที่ได้รับ" style="max-width:170px">
+    <input class="search-box" type="date" id="divDate" style="max-width:150px">
+    <input class="search-box" type="text" id="divNote" placeholder="หมายเหตุ (เช่น ปันผล AAPL)" style="max-width:200px">
+    <button class="btn btn-primary" onclick="addDividend()">+ บันทึกเงินเข้า</button>
+  </div>
   <div class="table-wrap">
     <table>
       <thead><tr><th>วันที่</th><th>THB ที่แลก</th><th>อัตราแลก</th><th>USD ที่ได้</th><th>หมายเหตุ</th><th></th></tr></thead>

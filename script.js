@@ -4,6 +4,17 @@ const SUPABASE_KEY = 'sb_publishable_wdGgFdHqIqH2E0tCkrzOUw_NtqRXbEu';
 const { createClient } = supabase;
 const sb = createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// ✦ FIX: supabase-js ไม่ throw exception เวลา insert/upsert ไม่สำเร็จ (เช่นโดน RLS policy
+// บล็อก หรือ column ไม่ตรง) — มัน resolve เป็น { data, error } เฉยๆ ทำให้โค้ดเดิมที่เขียน
+// `try { await sb.from(...).insert(...) } catch(e) { ...fallback... }` ทั่วทั้งไฟล์ catch()
+// ไม่เคยทำงานเลย ข้อมูลหายไปเงียบๆ ทั้งที่หน้าเว็บขึ้น toast ว่า "บันทึกแล้ว"
+// ฟังก์ชันนี้ห่อ query ของ supabase แล้ว throw error จริงๆ ถ้ามี error กลับมา เพื่อให้
+// catch(e) ด้านนอก (fallback ไป localStorage) ทำงานตามที่ตั้งใจไว้
+async function sbWrite(query) {
+  const { error } = await query;
+  if (error) throw error;
+}
+
 let THB_RATE = 32.48; // default fallback, will be updated from live API
 let currency = 'USD';
 let editIndex = -1;
@@ -2481,13 +2492,40 @@ async function addWalletTx() {
   _walletTxs.push(tx);
 
   try {
-    await sb.from('wallet_transactions').insert({ ...tx });
+    await sbWrite(sb.from('wallet_transactions').insert({ ...tx }));
+    showToast('💱 บันทึกการแลกเงินแล้ว');
   } catch (e) {
+    console.error('[Wallet] บันทึกขึ้น Server ไม่สำเร็จ:', e.message || e);
     localStorage.setItem('wallet_txs', JSON.stringify(_walletTxs));
+    showToast('⚠️ บันทึกขึ้น Server ไม่สำเร็จ (เก็บไว้ในเครื่องนี้ชั่วคราว)', 'var(--red)');
   }
 
   ['txAmount', 'txRate', 'txNote'].forEach(id => document.getElementById(id).value = '');
-  showToast('💱 บันทึกการแลกเงินแล้ว');
+  renderWalletTab();
+}
+
+// ✦ NEW: เงินเข้าตรงๆ ที่ไม่ได้มาจากการแลก THB→USD (ปันผล, ดอกเบี้ย ฯลฯ)
+// ใช้ type: 'dividend' — amount(THB)=0 เพราะไม่ได้แลกเงิน, usd = จำนวนที่ได้รับจริง
+async function addDividend() {
+  const usd  = parseFloat(document.getElementById('divAmount').value);
+  const date = document.getElementById('divDate').value || new Date().toISOString().slice(0, 10);
+  const note = document.getElementById('divNote').value.trim() || 'เงินปันผล';
+
+  if (isNaN(usd) || usd <= 0) { showToast('กรุณากรอกจำนวน USD ที่ได้รับ', 'var(--red)'); return; }
+
+  const tx = { id: 'w' + Date.now(), type: 'dividend', amount: 0, rate: 0, usd, date, note };
+  _walletTxs.push(tx);
+
+  try {
+    await sbWrite(sb.from('wallet_transactions').insert({ ...tx }));
+    showToast('💵 บันทึกเงินเข้าแล้ว');
+  } catch (e) {
+    console.error('[Wallet] บันทึกเงินปันผลไม่สำเร็จ:', e.message || e);
+    localStorage.setItem('wallet_txs', JSON.stringify(_walletTxs));
+    showToast('⚠️ บันทึกขึ้น Server ไม่สำเร็จ (เก็บไว้ในเครื่องนี้ชั่วคราว)', 'var(--red)');
+  }
+
+  ['divAmount', 'divNote'].forEach(id => document.getElementById(id).value = '');
   renderWalletTab();
 }
 
@@ -2513,16 +2551,22 @@ function renderWalletTab() {
   const avgRate = fxBuyUSD > 0 ? fxBuyTHB / fxBuyUSD : THB_RATE;
   const portfolioCostTHB = portfolioCostUSD * avgRate;
 
-  // USD คงเหลือ = USD แลกมา - ต้นทุน USD ในพอร์ต
-  const usdBalance = fxBuyUSD - portfolioCostUSD;
+  // sell returns (เงินรับจากขายหุ้น)
+  const sellReturns    = _walletTxs.filter(t => t.type === 'sell_return').reduce((a, t) => a + t.amount, 0);
+  const sellReturnsUSD = _walletTxs.filter(t => t.type === 'sell_return').reduce((a, t) => a + (t.usd || 0), 0);
+  // ✦ NEW: เงินปันผล/เงินเข้าอื่นๆ (ไม่ได้แลกมา แต่เข้าบัญชี USD ตรงๆ)
+  const dividendUSD   = _walletTxs.filter(t => t.type === 'dividend').reduce((a, t) => a + (t.usd || 0), 0);
+  const dividendCount = _walletTxs.filter(t => t.type === 'dividend').length;
+
+  // ✦ FIX: เดิม usdBalance นับแค่ fxBuyUSD ลบต้นทุนหุ้น เพียงอย่างเดียว
+  // ไม่เคยบวกเงินรับจากขายหุ้น (sell_return) หรือปันผล (dividend) เข้าไปเลย
+  // ทำให้ยอดคงเหลือติดลบผิดจากความเป็นจริงถ้ามีเงินเข้าจาก 2 ทางนี้
+  const usdBalance = fxBuyUSD + sellReturnsUSD + dividendUSD - portfolioCostUSD;
 
   // กำไร/ขาดทุนค่าเงิน (FX P&L):
   // มูลค่าพอร์ตปัจจุบัน (THB) = _stocks.reduce price × shares × currentRate
   const portfolioValueTHB = _stocks.reduce((a, s) => a + (parseFloat(s.price || s.cost || 0) * parseFloat(s.shares || 0)), 0) * THB_RATE;
   // fxPnl คำนวณด้านล่างตอน render cards แล้ว
-
-  // sell returns
-  const sellReturns = _walletTxs.filter(t => t.type === 'sell_return').reduce((a, t) => a + t.amount, 0);
 
   // FX P&L: เปรียบเทียบ avg rate ที่เราแลก vs THB_RATE ปัจจุบัน
   // ถ้าแลกแพง (avgRate > THB_RATE ปัจจุบัน) = ขาดทุนค่าเงิน
@@ -2565,12 +2609,17 @@ function renderWalletTab() {
     <div class="card">
       <div class="card-label">💵 USD คงเหลือ</div>
       <div class="card-value ${usdBalance >= 0 ? 'green' : 'red'}">${usdBalance >= 0 ? '+' : ''}$${fmt(usdBalance, 2)}</div>
-      <div class="card-sub">แลกมา $${fmt(fxBuyUSD,2)} / ลงทุนไป $${fmt(portfolioCostUSD,2)}</div>
+      <div class="card-sub">แลก $${fmt(fxBuyUSD,2)} + ขายหุ้น $${fmt(sellReturnsUSD,2)} + ปันผล $${fmt(dividendUSD,2)} / ลงทุนไป $${fmt(portfolioCostUSD,2)}</div>
     </div>
     <div class="card">
       <div class="card-label">📤 รับจากขายหุ้น</div>
       <div class="card-value ${sellReturns > 0 ? 'green' : ''}">${sellReturns > 0 ? '+฿' + fmt(sellReturns) : '—'}</div>
       <div class="card-sub">${_walletTxs.filter(t => t.type === 'sell_return').length} รายการ</div>
+    </div>
+    <div class="card">
+      <div class="card-label">💵 เงินปันผล/เงินเข้าอื่นๆ</div>
+      <div class="card-value ${dividendUSD > 0 ? 'green' : ''}">${dividendUSD > 0 ? '+$' + fmt(dividendUSD, 2) : '—'}</div>
+      <div class="card-sub">${dividendCount} รายการ</div>
     </div>
   `;
 
@@ -2609,24 +2658,23 @@ function renderWalletTab() {
     }
   });
 
-  // Table - แสดงเฉพาะ fx_buy และ sell_return
+  // Table - แสดง fx_buy, sell_return, dividend
   const tbody = document.getElementById('walletBody');
   const txSorted = [..._walletTxs]
-    .filter(t => t.type === 'fx_buy' || t.type === 'sell_return' || t.type === 'deposit')
+    .filter(t => t.type === 'fx_buy' || t.type === 'sell_return' || t.type === 'deposit' || t.type === 'dividend')
     .sort((a, b) => b.date.localeCompare(a.date));
   tbody.innerHTML = txSorted.length === 0
     ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">ยังไม่มีรายการแลกเงิน</td></tr>`
     : txSorted.map(t => {
       const isSell = t.type === 'sell_return';
-      const isFx = t.type === 'fx_buy' || t.type === 'deposit';
-      const cls = isSell ? 'tx-deposit' : 'tx-exchange';
-      const label = isSell ? '📤 ขายหุ้น' : '💱 แลกเงิน';
+      const isDiv  = t.type === 'dividend';
+      const label = isSell ? '📤 ขายหุ้น' : isDiv ? '💵 เงินเข้าอื่นๆ' : '💱 แลกเงิน';
       return `<tr>
         <td class="mono" style="color:var(--muted)">${t.date}</td>
-        <td class="mono tx-exchange">-฿${fmt(t.amount)}</td>
+        <td class="mono tx-exchange">${t.amount > 0 ? '-฿' + fmt(t.amount) : '—'}</td>
         <td class="mono" style="color:var(--muted)">${t.rate > 0 ? t.rate.toFixed(4) : '—'}</td>
         <td class="mono green">+$${t.usd > 0 ? fmt(t.usd, 4) : '—'}</td>
-        <td style="color:var(--muted);font-size:0.8rem">${t.note || ''}</td>
+        <td style="color:var(--muted);font-size:0.8rem">${label} ${t.note || ''}</td>
         <td><button class="btn-icon del" onclick="deleteWalletTx('${t.id}')">✕</button></td>
       </tr>`;
     }).join('');
@@ -2659,12 +2707,14 @@ async function addAsset() {
   const asset = { id: 'ast' + Date.now(), name, type, value, cost, note };
   _assets.push(asset);
   try {
-    await sb.from('other_assets').insert({ ...asset });
+    await sbWrite(sb.from('other_assets').insert({ ...asset }));
+    showToast('🏦 เพิ่มสินทรัพย์แล้ว');
   } catch (e) {
+    console.error('[Assets] บันทึกขึ้น Server ไม่สำเร็จ:', e.message || e);
     localStorage.setItem('other_assets', JSON.stringify(_assets));
+    showToast('⚠️ บันทึกขึ้น Server ไม่สำเร็จ (เก็บไว้ในเครื่องนี้ชั่วคราว)', 'var(--red)');
   }
   ['a_name', 'a_value', 'a_cost', 'a_note'].forEach(id => document.getElementById(id).value = '');
-  showToast('🏦 เพิ่มสินทรัพย์แล้ว');
   renderAssetsTab();
 }
 
@@ -3462,8 +3512,11 @@ async function fetchGoldPrice() {
   const CHNWT_URL = 'https://api.chnwt.dev/thai-gold-api/latest';
   // แหล่งแรก: gold-price.json ที่ GitHub Actions อัปเดตทุก 30 นาที (same-origin, ไม่มี CORS)
   // ถ้าไม่มีหรือข้อมูลเก่าเกิน 2 ชั่วโมง ค่อยลอง CHNWT และ CORS proxy ตามลำดับ
+  // ✦ FIX: เติม cache-busting query (?t=timestamp) กัน browser/CDN cache ไฟล์ gold-price.json
+  // ค้างไว้ (เจออาการ "กดรีเฟรชแล้วราคาทองไม่อัปเดต") — ของเดิมไม่มี query เลย ทำให้บาง
+  // เบราว์เซอร์/edge cache ของ GitHub Pages อาจส่งไฟล์เวอร์ชันเก่ากลับมาซ้ำๆ
   const attempts = [
-    { url: './gold-price.json', label: 'สมาคมค้าทองคำ (GitHub Actions cache)' },
+    { url: './gold-price.json?t=' + Date.now(), label: 'สมาคมค้าทองคำ (GitHub Actions cache)' },
     { url: CHNWT_URL, label: 'สมาคมค้าทองคำ (goldtraders.or.th)' },
     { url: 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(CHNWT_URL), label: 'สมาคมค้าทองคำ (ผ่าน CORS proxy)' },
     { url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(CHNWT_URL), label: 'สมาคมค้าทองคำ (ผ่าน CORS proxy สำรอง)' },
@@ -3548,8 +3601,14 @@ async function loadGoldFromSB() {
 }
 
 async function saveGoldToSB(entry) {
-  try { await sb.from('gold_entries').upsert({ ...entry }); }
-  catch (e) { localStorage.setItem('gold_entries', JSON.stringify(_goldEntries)); }
+  try {
+    await sbWrite(sb.from('gold_entries').upsert({ ...entry }));
+    return true;
+  } catch (e) {
+    console.error('[Gold] บันทึกขึ้น Server ไม่สำเร็จ:', e.message || e);
+    localStorage.setItem('gold_entries', JSON.stringify(_goldEntries));
+    return false;
+  }
 }
 
 async function initGoldTab() {
@@ -3589,10 +3648,14 @@ async function addGoldEntry() {
     date, note
   };
   _goldEntries.push(entry);
-  await saveGoldToSB(entry);
+  const saved = await saveGoldToSB(entry);
 
   ['g_buyPrice', 'g_weight', 'g_note'].forEach(id => document.getElementById(id).value = '');
-  showToast('🥇 เพิ่มรายการทองแล้ว');
+  if (saved) {
+    showToast('🥇 เพิ่มรายการทองแล้ว');
+  } else {
+    showToast('⚠️ บันทึกขึ้น Server ไม่สำเร็จ (เก็บไว้ในเครื่องนี้ชั่วคราว)', 'var(--red)');
+  }
   renderGoldTab();
 }
 

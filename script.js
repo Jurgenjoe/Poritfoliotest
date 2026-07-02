@@ -145,7 +145,11 @@ async function updatePricesInSB(updatedStocks) {
     ticker: s.ticker, shares: s.shares, cost: s.cost,
     price: s.price, sector: s.sector, color: s.color
   }));
-  await sb.from('stocks').upsert(rows, { onConflict: 'ticker' });
+  const { error } = await sb.from('stocks').upsert(rows, { onConflict: 'ticker' });
+  if (error) {
+    console.error('[Prices] Supabase upsert error (real-time price refresh not saved):', error);
+    showToast('⚠️ อัปเดตราคาไม่ถูกบันทึกลง Supabase: ' + (error.message || error.code), 'var(--red)');
+  }
 }
 
 function getHistory() { return _history; }
@@ -2183,16 +2187,19 @@ function removeDrawing(id) {
 
 // ---- Persist drawings to Supabase (table: chart_drawings) ----
 async function saveDrawingsToSB() {
-  try {
-    const rows = detailState.drawings.map(d => ({
-      id: d.id, ticker: d.ticker, type: d.type, color: d.color,
-      data: JSON.stringify({ p1: d.p1, p2: d.p2 || null })
-    }));
-    // Replace-all-for-ticker strategy: delete then insert (simplest correctness for small datasets)
-    await sb.from('chart_drawings').delete().eq('ticker', detailState.ticker);
-    if (rows.length) await sb.from('chart_drawings').insert(rows.filter(r=>r.ticker===detailState.ticker));
-  } catch(e) {
-    console.warn('chart_drawings table may not exist yet:', e.message);
+  const rows = detailState.drawings.map(d => ({
+    id: d.id, ticker: d.ticker, type: d.type, color: d.color,
+    data: JSON.stringify({ p1: d.p1, p2: d.p2 || null })
+  }));
+  // Replace-all-for-ticker strategy: delete then insert (simplest correctness for small datasets)
+  const del = await sb.from('chart_drawings').delete().eq('ticker', detailState.ticker);
+  if (del.error) { console.error('[Drawings] delete error:', del.error); return; }
+  if (rows.length) {
+    const ins = await sb.from('chart_drawings').insert(rows.filter(r=>r.ticker===detailState.ticker));
+    if (ins.error) {
+      console.error('[Drawings] insert error:', ins.error);
+      showToast('⚠️ บันทึกเส้นวาดไม่สำเร็จ: ' + (ins.error.message || ins.error.code), 'var(--red)');
+    }
   }
 }
 async function loadDrawingsFromSB() {
@@ -2231,16 +2238,20 @@ async function addAlert() {
   document.getElementById('alertPrice').value = '';
   renderAlertsUI();
   drawChart();
-  try {
-    await sb.from('price_alerts').insert({ id:a.id, ticker:a.ticker, cond:a.cond, price:a.price, triggered:false });
-  } catch(e) { console.warn('price_alerts table may not exist yet:', e.message); }
-  showToast('🔔 ตั้งเตือนแล้ว');
+  const { error } = await sb.from('price_alerts').insert({ id:a.id, ticker:a.ticker, cond:a.cond, price:a.price, triggered:false });
+  if (error) {
+    console.error('[Alerts] Supabase insert error:', error);
+    showToast('⚠️ ตั้งเตือนใน Supabase ไม่สำเร็จ (ใช้ได้แค่ session นี้): ' + (error.message || error.code), 'var(--red)');
+  } else {
+    showToast('🔔 ตั้งเตือนแล้ว');
+  }
 }
 async function removeAlert(id) {
   detailState.alerts = detailState.alerts.filter(a=>a.id!==id);
   renderAlertsUI();
   drawChart();
-  try { await sb.from('price_alerts').delete().eq('id', id); } catch(e) {}
+  const { error } = await sb.from('price_alerts').delete().eq('id', id);
+  if (error) console.error('[Alerts] Supabase delete error:', error);
 }
 async function loadAlertsFromSB() {
   try {
@@ -2664,20 +2675,25 @@ async function addAsset() {
 
   const asset = { id: 'ast' + Date.now(), name, type, value, cost, note };
   _assets.push(asset);
-  try {
-    await sb.from('other_assets').insert({ ...asset });
-  } catch (e) {
+  const { error } = await sb.from('other_assets').insert({ ...asset });
+  if (error) {
+    console.error('[Assets] Supabase insert error:', error);
     localStorage.setItem('other_assets', JSON.stringify(_assets));
+    showToast('⚠️ บันทึกสินทรัพย์ลง Supabase ไม่สำเร็จ: ' + (error.message || error.code), 'var(--red)');
+  } else {
+    showToast('🏦 เพิ่มสินทรัพย์แล้ว');
   }
   ['a_name', 'a_value', 'a_cost', 'a_note'].forEach(id => document.getElementById(id).value = '');
-  showToast('🏦 เพิ่มสินทรัพย์แล้ว');
   renderAssetsTab();
 }
 
 async function deleteAsset(id) {
   _assets = _assets.filter(a => a.id !== id);
-  try { await sb.from('other_assets').delete().eq('id', id); } catch (e) {
+  const { error } = await sb.from('other_assets').delete().eq('id', id);
+  if (error) {
+    console.error('[Assets] Supabase delete error:', error);
     localStorage.setItem('other_assets', JSON.stringify(_assets));
+    showToast('⚠️ ลบสินทรัพย์ใน Supabase ไม่สำเร็จ: ' + (error.message || error.code), 'var(--red)');
   }
   renderAssetsTab();
 }

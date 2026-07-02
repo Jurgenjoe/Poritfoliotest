@@ -599,8 +599,38 @@
   .detail-price { font-family: var(--font-mono); font-size: 1.3rem; font-weight: 700; }
   .detail-chg { font-family: var(--font-mono); font-size: 0.85rem; font-weight: 700; }
 
-  .detail-body { max-width: 1200px; margin: 0 auto; padding: 18px 20px 60px; display: grid; grid-template-columns: 1fr 280px; gap: 18px; }
-  @media (max-width: 900px) { .detail-body { grid-template-columns: 1fr; } }
+  .detail-body { max-width: 1400px; margin: 0 auto; padding: 18px 20px 60px; display: grid; grid-template-columns: 180px 1fr 280px; gap: 18px; align-items: start; }
+  @media (max-width: 1100px) { .detail-body { grid-template-columns: 170px 1fr; } .detail-side { grid-column: 1 / -1; } }
+  @media (max-width: 900px) { .detail-body { grid-template-columns: 1fr; } .detail-watchlist { position: static; width: 100%; max-height: 220px; order: -1; } .detail-side { grid-column: auto; } }
+
+  /* ---- Left watchlist column (TradingView-style) ---- */
+  .detail-watchlist {
+    width: 180px; min-width: 180px; max-width: 180px; flex-shrink: 0;
+    position: sticky; top: 78px;
+    max-height: calc(100vh - 96px);
+    display: flex; flex-direction: column;
+    background: var(--surface); border: 1px solid var(--border); border-radius: 12px;
+    overflow: hidden;
+  }
+  .watchlist-search { padding: 10px; border-bottom: 1px solid var(--border); flex-shrink: 0; }
+  .watchlist-search input {
+    width: 100%; background: var(--surface2); border: 1px solid var(--border);
+    border-radius: 8px; color: var(--text); font-size: 0.78rem; padding: 7px 10px;
+    box-sizing: border-box; outline: none;
+  }
+  .watchlist-search input:focus { border-color: var(--accent); }
+  .watchlist-header {
+    font-family: var(--font-mono); font-size: 0.62rem; color: var(--muted);
+    text-transform: uppercase; letter-spacing: 1px; padding: 10px 12px 6px; flex-shrink: 0;
+  }
+  .watchlist-list { overflow-y: auto; padding: 0 8px 10px; flex: 1; }
+  .watchlist-row {
+    display: flex; flex-direction: column; gap: 2px;
+    padding: 7px 8px; cursor: pointer; border-radius: 6px;
+    transition: background 0.12s;
+  }
+  .watchlist-row:hover { background: rgba(127,127,127,0.12); }
+  .watchlist-row.active { background: rgba(0,229,160,0.14); box-shadow: inset 2px 0 0 var(--accent); }
 
   .detail-main { min-width: 0; }
   .chart-toolbar {
@@ -794,3 +824,56 @@
   border-color:var(--accent);
   color:var(--text);
 }
+
+/* === Gold price banner (รับซื้อ/ขายออก ทองคำแท่ง 96.5%) === */
+.gold-price-banner {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 10px 14px;
+}
+.gold-price-banner-label {
+  display: flex;
+  align-items: center;
+  font-weight: 700;
+  font-size: 0.82rem;
+  color: var(--gold);
+  background: rgba(245,200,66,0.12);
+  border-radius: 8px;
+  padding: 0 14px;
+  white-space: nowrap;
+}
+.gold-price-row { display: flex; gap: 10px; }
+.gold-price-box {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 18px;
+  border-radius: 8px;
+  background: var(--surface2);
+  min-width: 100px;
+}
+.gold-price-box-label { font-size: 0.68rem; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; font-family: var(--font-mono); }
+.gold-price-box-val { font-family: var(--font-mono); font-weight: 700; font-size: 1rem; color: var(--green); }
+.gold-price-meta { font-size: 0.72rem; color: var(--muted); display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+
+/* Timeframe selector buttons */
+.tf-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  font-size: .72rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 5px;
+  cursor: pointer;
+  transition: all .15s;
+  font-family: var(--font-mono);
+}
+.tf-btn:hover { border-color: var(--green); color: var(--green); }
+.tf-btn-active { background: var(--green); color: #04110c !important; border-color: var(--green) !important; }

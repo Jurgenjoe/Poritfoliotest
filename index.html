@@ -56,6 +56,9 @@
       <option value="THB">THB</option>
     </select>
     <button class="btn btn-outline" id="refreshBtn" onclick="fetchRealPrices()" title="ดึงราคาจริงจาก Yahoo Finance">🔄 Refresh</button>
+    <button class="btn btn-outline" onclick="backupAllData()" title="ดาวน์โหลดข้อมูลทั้งหมดเป็นไฟล์สำรอง">💾 Backup</button>
+    <button class="btn btn-outline" onclick="document.getElementById('restoreFileInput').click()" title="กู้คืนข้อมูลจากไฟล์สำรอง">📥 Restore</button>
+    <input type="file" id="restoreFileInput" accept="application/json" style="display:none" onchange="restoreAllData(event)">
     <button class="btn btn-primary" onclick="openModal()">+ เพิ่มหุ้น</button>
   </div>
 </div>
@@ -70,6 +73,9 @@
   <button class="tab-btn" onclick="switchTab('wallet')">💰 กระเป๋าเงิน</button>
   <button class="tab-btn" onclick="switchTab('assets')">🏦 สินทรัพย์อื่น</button>
   <button class="tab-btn" onclick="switchTab('import')">📄 Import PDF</button>
+  <button class="tab-btn" onclick="switchTab('gold')">🥇 ออมทอง</button>
+  <button class="tab-btn" onclick="switchTab('news')">📰 ข่าว</button>
+  <button class="tab-btn" onclick="switchTab('feargreed')">😨 Fear &amp; Greed</button>
 </div>
 
 <!-- ===== TAB: PORTFOLIO (existing) ===== -->
@@ -81,12 +87,38 @@
   <!-- CHARTS -->
   <div class="charts-row">
     <div class="chart-card">
-      <div class="chart-title">📈 มูลค่าพอร์ต (เส้น)</div>
-      <canvas id="lineChart" height="180"></canvas>
+      <div class="chart-title" style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:6px;">
+        <span>📈 มูลค่าพอร์ต</span>
+        <div style="display:flex;gap:4px;">
+          <button class="tf-btn tf-btn-active" data-tf="MAX" onclick="renderLineChart('MAX')">MAX</button>
+        </div>
+      </div>
+      <canvas id="lineChart" height="200"></canvas>
+      <div id="lineChartInfo" style="font-size:.75rem;color:#5a6478;margin-top:4px;text-align:right;"></div>
     </div>
     <div class="chart-card">
       <div class="chart-title">🥧 สัดส่วนการถือ</div>
       <canvas id="pieChart" height="180"></canvas>
+    </div>
+  </div>
+
+  <!-- WEEKLY PORTFOLIO CHANGE TABLE -->
+  <div class="chart-card" style="margin-bottom:16px;" id="weeklyChangeSection">
+    <div class="chart-title" style="display:flex;align-items:center;justify-content:space-between;">
+      <span>📅 % เปลี่ยนแปลงมูลค่าพอร์ตรายวัน (จันทร์–ศุกร์)</span>
+      <select id="weeklyWeeksSelect" class="dropdown" style="font-size:.78rem;padding:3px 8px;width:auto;" onchange="renderWeeklyChange()">
+        <option value="4">4 สัปดาห์ล่าสุด</option>
+        <option value="8">8 สัปดาห์ล่าสุด</option>
+        <option value="12">12 สัปดาห์ล่าสุด</option>
+      </select>
+    </div>
+    <div style="overflow-x:auto;margin-top:10px;">
+      <table id="weeklyChangeTable" style="width:100%;border-collapse:collapse;font-size:.82rem;">
+        <thead>
+          <tr id="weeklyChangeHead" style="color:#5a6478;"></tr>
+        </thead>
+        <tbody id="weeklyChangeBody"></tbody>
+      </table>
     </div>
   </div>
 
@@ -163,29 +195,25 @@
 <!-- ===== TAB: WALLET ===== -->
 <div id="tab_wallet" class="tab-page">
 <div class="main">
-  <div class="page-header"><h2>💰 กระเป๋าเงิน</h2></div>
+  <div class="page-header"><h2>💱 กระเป๋าเงิน / FX Tracker</h2></div>
   <div class="summary-grid" id="walletCards"></div>
   <div class="charts-row" style="margin-top:18px">
     <div class="chart-card" style="grid-column:span 2">
-      <div class="chart-title">📅 ประวัติฝาก-ถอน</div>
+      <div class="chart-title">📅 ประวัติแลกเงิน (THB สะสม)</div>
       <canvas id="walletChart" height="160"></canvas>
     </div>
   </div>
   <div style="margin:18px 0 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <select class="dropdown" id="txType">
-      <option value="deposit">ฝากเงิน</option>
-      <option value="withdraw">ถอนเงิน</option>
-      <option value="exchange">แลกเปลี่ยน</option>
-    </select>
-    <input class="search-box" type="number" id="txAmount" placeholder="จำนวน THB" style="max-width:160px">
-    <input class="search-box" type="number" id="txRate" placeholder="อัตราแลก (ถ้าแลก)" style="max-width:160px">
-    <input class="search-box" type="date" id="txDate" style="max-width:160px">
-    <input class="search-box" type="text" id="txNote" placeholder="หมายเหตุ" style="max-width:200px">
-    <button class="btn btn-primary" onclick="addWalletTx()">+ บันทึก</button>
+    <span style="color:var(--accent);font-weight:600;font-size:0.9rem">💱 แลกเงิน THB→USD</span>
+    <input class="search-box" type="number" id="txAmount" placeholder="จำนวน THB ที่แลก" style="max-width:160px">
+    <input class="search-box" type="number" id="txRate" placeholder="อัตราแลก (THB/USD)" style="max-width:170px">
+    <input class="search-box" type="date" id="txDate" style="max-width:150px">
+    <input class="search-box" type="text" id="txNote" placeholder="หมายเหตุ (เช่น SCB, Wise)" style="max-width:200px">
+    <button class="btn btn-primary" onclick="addWalletTx()">+ บันทึกแลกเงิน</button>
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>วันที่</th><th>ประเภท</th><th>จำนวน (THB)</th><th>อัตราแลก</th><th>USD ได้</th><th>หมายเหตุ</th><th></th></tr></thead>
+      <thead><tr><th>วันที่</th><th>THB ที่แลก</th><th>อัตราแลก</th><th>USD ที่ได้</th><th>หมายเหตุ</th><th></th></tr></thead>
       <tbody id="walletBody"></tbody>
     </table>
   </div>
@@ -220,7 +248,176 @@
   </div>
   <div class="chart-card" style="margin-top:18px">
     <div class="chart-title">🌐 Net Worth ทั้งหมด (THB)</div>
-    <canvas id="networthChart" height="200"></canvas>
+    <canvas id="networthChart" height="200" style="max-width:70%;margin:0 auto;display:block"></canvas>
+  </div>
+</div>
+</div>
+
+<!-- ===== TAB: GOLD ===== -->
+<div id="tab_gold" class="tab-page">
+<div class="main">
+  <div class="page-header" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <h2>🥇 ออมทอง</h2>
+    <div class="gold-price-banner" id="goldPriceBanner">
+      <div class="gold-price-banner-label">ทองคำแท่ง 96.5%</div>
+      <div class="gold-price-row">
+        <div class="gold-price-box">
+          <div class="gold-price-box-label">รับซื้อ</div>
+          <div class="gold-price-box-val" id="goldBuyVal">—</div>
+        </div>
+        <div class="gold-price-box">
+          <div class="gold-price-box-label">ขายออก</div>
+          <div class="gold-price-box-val" id="goldSellVal">—</div>
+        </div>
+      </div>
+      <div class="gold-price-meta" id="goldPriceMeta">⏳ กำลังโหลดราคาทอง...</div>
+      <button class="btn-icon" onclick="initGoldTab()" title="รีเฟรชราคาทอง" style="margin-left:auto">🔄</button>
+    </div>
+  </div>
+  <div class="summary-grid" id="goldCards"></div>
+
+  <!-- Gold calculator -->
+  <div class="chart-card" style="margin-top:18px">
+    <div class="chart-title">🧮 คำนวณซื้อทอง</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <input class="search-box" type="number" id="gc_price" placeholder="ราคาทอง (THB/บาท)" style="max-width:200px" oninput="calcGoldRecalc()">
+      <button class="btn btn-outline" onclick="useCurrentGoldPriceInCalc()">📡 ใช้ราคาปัจจุบัน</button>
+    </div>
+    <div style="display:flex;gap:24px;flex-wrap:wrap;margin-top:14px">
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span style="color:var(--muted);font-size:0.85rem">มีเงิน</span>
+        <input class="search-box" type="number" id="gc_amount" placeholder="จำนวนเงิน (THB)" style="max-width:180px" oninput="calcGoldFromAmount()">
+        <span style="color:var(--muted);font-size:0.85rem">→ ได้ทองกี่บาท/กรัม</span>
+      </div>
+      <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+        <span style="color:var(--muted);font-size:0.85rem">อยากได้ทอง</span>
+        <input class="search-box" type="number" id="gc_weight" placeholder="น้ำหนัก" style="max-width:140px" oninput="calcGoldFromWeight()">
+        <select class="dropdown" id="gc_weightUnit" onchange="calcGoldFromWeight()">
+          <option value="baht">บาททอง</option>
+          <option value="gram">กรัม</option>
+        </select>
+        <span style="color:var(--muted);font-size:0.85rem">→ ใช้เงินเท่าไหร่</span>
+      </div>
+    </div>
+    <div id="gc_result" style="margin-top:14px;font-size:0.95rem;line-height:1.6">
+      <span style="color:var(--muted)">กรอกจำนวนเงินหรือน้ำหนักด้านบนเพื่อคำนวณ</span>
+    </div>
+  </div>
+
+  <!-- Add form -->
+  <div class="chart-card" style="margin-top:18px">
+    <div class="chart-title">➕ เพิ่มรายการซื้อทอง</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <input class="search-box" type="number" id="g_buyPrice" placeholder="ราคาที่ซื้อ (THB/บาททอง)" style="max-width:200px">
+      <input class="search-box" type="number" id="g_weight" placeholder="น้ำหนัก (บาทหรือกรัม)" style="max-width:180px">
+      <select class="dropdown" id="g_unit">
+        <option value="baht">บาททอง</option>
+        <option value="gram">กรัม</option>
+      </select>
+      <input class="search-box" type="date" id="g_date" style="max-width:150px">
+      <input class="search-box" type="text" id="g_note" placeholder="หมายเหตุ" style="max-width:180px">
+      <button class="btn btn-primary" onclick="addGoldEntry()">+ เพิ่ม</button>
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap" style="margin-top:18px">
+    <table>
+      <thead><tr>
+        <th>#</th>
+        <th>วันที่</th>
+        <th>ราคาที่ซื้อ (THB)</th>
+        <th>น้ำหนัก</th>
+        <th>ราคาปัจจุบัน (THB)</th>
+        <th>บวก/ลบ (THB)</th>
+        <th>%</th>
+        <th>หมายเหตุ</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="goldBody"></tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<!-- ===== TAB: NEWS / EARNINGS ===== -->
+<div id="tab_news" class="tab-page">
+<div class="main">
+  <div class="page-header" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <h2>📰 ข่าว &amp; ปฏิทินผลประกอบการ</h2>
+    <button class="btn-icon" onclick="refreshNewsTab()" title="รีเฟรช" style="margin-left:auto">🔄</button>
+  </div>
+
+  <div class="news-tabs" style="display:flex;gap:8px;margin:14px 0;flex-wrap:wrap">
+    <button class="import-tab-btn active" id="newsSubBtn_holdings" onclick="switchNewsSub('holdings')">📌 ข่าวหุ้นที่ถือ</button>
+    <button class="import-tab-btn" id="newsSubBtn_market" onclick="switchNewsSub('market')">🌐 ข่าวภาพรวมตลาด</button>
+    <button class="import-tab-btn" id="newsSubBtn_calendar" onclick="switchNewsSub('calendar')">📅 ปฏิทิน Earnings</button>
+  </div>
+
+  <div id="newsSub_holdings" class="news-sub-page">
+    <div id="newsHoldingsList" class="chart-card">
+      <div style="color:var(--muted);text-align:center;padding:24px">⏳ กำลังโหลดข่าว...</div>
+    </div>
+  </div>
+
+  <div id="newsSub_market" class="news-sub-page" style="display:none">
+    <div id="newsMarketList" class="chart-card">
+      <div style="color:var(--muted);text-align:center;padding:24px">⏳ กำลังโหลดข่าว...</div>
+    </div>
+  </div>
+
+  <div id="newsSub_calendar" class="news-sub-page" style="display:none">
+    <div id="earningsCalendarList" class="chart-card">
+      <div style="color:var(--muted);text-align:center;padding:24px">⏳ กำลังโหลดปฏิทิน...</div>
+    </div>
+  </div>
+</div>
+</div>
+
+<!-- ===== TAB: FEAR & GREED (VIX-based) ===== -->
+<div id="tab_feargreed" class="tab-page">
+<div class="main">
+  <div class="page-header" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <h2>😨 Fear &amp; Greed Index (อิงจาก VIX)</h2>
+    <button class="btn-icon" onclick="fetchVixFearGreed()" title="รีเฟรช" style="margin-left:auto">🔄</button>
+  </div>
+
+  <div class="chart-card" style="margin-top:18px;text-align:center;padding:28px 20px">
+    <div id="fgMeta" style="color:var(--muted);font-size:0.85rem;margin-bottom:18px">⏳ กำลังโหลดข้อมูล VIX...</div>
+
+    <div style="max-width:480px;margin:0 auto">
+      <div style="position:relative;height:18px;border-radius:9px;
+                  background:linear-gradient(90deg,#c0392b 0%,#e67e22 25%,#f1c40f 50%,#2ecc71 75%,#16a085 100%);">
+        <div id="fgPointer" style="position:absolute;top:-9px;left:0%;width:4px;height:36px;background:var(--text,#fff);
+                  border-radius:2px;box-shadow:0 0 6px rgba(0,0,0,0.5);transition:left 0.6s ease"></div>
+      </div>
+      <div style="display:flex;justify-content:space-between;font-size:0.7rem;color:var(--muted);margin-top:6px">
+        <span>กลัวสุดขีด</span><span>กลัว</span><span>กลาง ๆ</span><span>โลภ</span><span>โลภสุดขีด</span>
+      </div>
+    </div>
+
+    <div id="fgScoreLabel" class="mono" style="font-size:2.4rem;font-weight:700;margin-top:24px">—</div>
+    <div id="fgScoreText" style="font-size:1.1rem;color:var(--muted);margin-top:4px">—</div>
+
+    <div style="display:flex;justify-content:center;gap:32px;margin-top:24px;flex-wrap:wrap">
+      <div>
+        <div style="color:var(--muted);font-size:0.75rem">VIX ปัจจุบัน</div>
+        <div id="fgVixVal" class="mono" style="font-size:1.3rem;font-weight:700">—</div>
+      </div>
+      <div>
+        <div style="color:var(--muted);font-size:0.75rem">เปลี่ยนแปลง</div>
+        <div id="fgVixChange" class="mono" style="font-size:1.3rem;font-weight:700">—</div>
+      </div>
+    </div>
+
+    <div style="margin-top:24px;font-size:0.78rem;color:var(--muted);text-align:left;max-width:480px;margin-left:auto;margin-right:auto;line-height:1.6">
+      ดัชนีนี้คำนวณจาก CBOE Volatility Index (VIX) ซึ่งสะท้อนความผันผวนที่ตลาดคาดการณ์ในตลาดหุ้นสหรัฐฯ
+      โดยทั่วไป VIX ต่ำ = นักลงทุนมั่นใจ/โลภ, VIX สูง = นักลงทุนกังวล/กลัว
+      (ไม่ใช่ตัวเลขเดียวกับ Fear &amp; Greed Index ของ CNN ที่ใช้ 7 องค์ประกอบ แต่เป็นตัวชี้วัดความกลัวของตลาดที่ใช้กันแพร่หลายและดึงข้อมูลแบบเรียลไทม์ได้)
+      <br><br>
+      ดูดัชนี Fear &amp; Greed ตัวจริงของ CNN (7 องค์ประกอบ) ได้ที่
+      <a href="https://edition.cnn.com/markets/fear-and-greed" target="_blank" rel="noopener" style="color:var(--accent)">edition.cnn.com/markets/fear-and-greed</a>
+    </div>
   </div>
 </div>
 </div>
@@ -232,8 +429,7 @@
 
   <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:8px">
     <button class="import-tab-btn active" id="importTabPdfBtn" onclick="switchImportMode('pdf')">📄 ไฟล์ PDF</button>
-    <button class="import-tab-btn" id="importTabImgBtn" onclick="switchImportMode('image')">🖼️ รูปสลิป (AI อ่านอัตโนมัติ)</button>
-    <button class="btn btn-outline" style="margin-left:auto" onclick="openApiKeyModal()" title="ตั้งค่า Claude API Key สำหรับอ่านรูป">🔑 ตั้งค่า API Key</button>
+    <button class="import-tab-btn" id="importTabImgBtn" onclick="switchImportMode('image')">🖼️ รูปสลิป (OCR อ่านอัตโนมัติ)</button>
   </div>
 
   <!-- PDF MODE -->
@@ -251,7 +447,7 @@
     <div class="import-zone" id="imageZone" onclick="document.getElementById('imageInput').click()" ondragover="imageDragOver(event)" ondrop="imageDrop(event)">
       <div class="import-icon">🖼️</div>
       <div class="import-title">คลิกหรือลากรูปสลิปมาวาง</div>
-      <div class="import-sub">ระบบจะใช้ AI อ่านข้อมูลแล้วแยกประเภทอัตโนมัติว่าเป็น "ซื้อหุ้น" หรือ "แลกเงิน/โอนเงิน"</div>
+      <div class="import-sub">ระบบจะใช้ OCR (อ่านตัวอักษรจากภาพ ฝั่งเบราว์เซอร์ ฟรี ไม่ต้องใช้ API Key) แล้วลองแยกประเภทอัตโนมัติว่าเป็น "ซื้อหุ้น" หรือ "แลกเงิน/โอนเงิน" — กรุณาตรวจสอบ/แก้ไขข้อมูลก่อนยืนยันเสมอ เพราะ OCR อาจอ่านผิดได้</div>
       <input type="file" id="imageInput" accept="image/*" style="display:none" onchange="importImageFile(this.files[0])">
     </div>
     <img id="imagePreviewThumb" style="display:none;max-width:160px;border-radius:10px;margin-top:12px;border:1px solid var(--border)">
@@ -271,15 +467,82 @@
     </div>
   </div>
 
-  <!-- IMAGE PREVIEW (AI extracted) -->
+  <!-- IMAGE PREVIEW (OCR extracted, editable) -->
   <div id="imageImportPreview" style="display:none">
     <div class="chart-card" style="margin-bottom:14px">
       <div class="chart-title">
-        🤖 ข้อมูลที่ AI อ่านได้จากรูป
+        🔎 ข้อมูลที่ OCR อ่านได้จากรูป (แก้ไขได้)
         <span id="imageTypeBadge" style="font-size:0.7rem;padding:3px 10px;border-radius:20px;margin-left:8px"></span>
       </div>
-      <div id="imageExtracted" style="font-size:0.85rem;line-height:1.8"></div>
-      <div style="margin-top:10px;font-size:0.78rem;color:var(--muted)">⚠️ กรุณาตรวจสอบความถูกต้องก่อนกดยืนยัน หาก AI อ่านผิดให้กดยกเลิกแล้วกรอกมือแทน</div>
+      <div style="margin-top:10px;font-size:0.78rem;color:var(--muted)">⚠️ OCR แม่นยำน้อยกว่า AI vision — กรุณาตรวจสอบ/แก้ไขตัวเลขทุกช่องก่อนกดยืนยันเสมอ</div>
+
+      <div class="form-row" style="margin-top:14px">
+        <label class="form-label">ประเภทรายการ</label>
+        <select class="form-input dropdown" id="oi_type" onchange="toggleOcrStockFields()">
+          <option value="stock_buy">🟢 ซื้อ/ขายหุ้น</option>
+          <option value="currency_exchange">💱 แลกเงิน / โอนเงิน</option>
+        </select>
+      </div>
+
+      <div id="ocrStockFields">
+        <div class="form-row-2">
+          <div class="form-row" style="margin:0">
+            <label class="form-label">ประเภทคำสั่ง</label>
+            <select class="form-input dropdown" id="oi_txType">
+              <option value="BUY">BUY (ซื้อ)</option>
+              <option value="SELL">SELL (ขาย)</option>
+            </select>
+          </div>
+          <div class="form-row" style="margin:0">
+            <label class="form-label">Ticker</label>
+            <input class="form-input" id="oi_ticker" placeholder="เช่น NVDA" style="text-transform:uppercase">
+          </div>
+        </div>
+        <div class="form-row-2">
+          <div class="form-row" style="margin:0">
+            <label class="form-label">จำนวนหุ้น</label>
+            <input class="form-input" id="oi_shares" type="number" step="0.0001" placeholder="0">
+          </div>
+          <div class="form-row" style="margin:0">
+            <label class="form-label">ราคาต่อหน่วย (USD)</label>
+            <input class="form-input" id="oi_unitPrice" type="number" step="0.01" placeholder="0.00">
+          </div>
+        </div>
+        <div class="form-row">
+          <label class="form-label">มูลค่ารวม (USD)</label>
+          <input class="form-input" id="oi_grossUSD" type="number" step="0.01" placeholder="0.00">
+        </div>
+      </div>
+
+      <div class="form-row-2">
+        <div class="form-row" style="margin:0">
+          <label class="form-label">อัตราแลกเปลี่ยน (THB ต่อ USD)</label>
+          <input class="form-input" id="oi_fxRate" type="number" step="0.0001" placeholder="32.50">
+        </div>
+        <div class="form-row" style="margin:0">
+          <label class="form-label">มูลค่ารวม (THB)</label>
+          <input class="form-input" id="oi_grossTHB" type="number" step="0.01" placeholder="0.00">
+        </div>
+      </div>
+      <div class="form-row-2">
+        <div class="form-row" style="margin:0">
+          <label class="form-label">วันที่ทำรายการ</label>
+          <input class="form-input" id="oi_date" type="date">
+        </div>
+        <div class="form-row" style="margin:0">
+          <label class="form-label">เลขที่อ้างอิง</label>
+          <input class="form-input" id="oi_orderId" placeholder="เลขที่อ้างอิง/Order ID">
+        </div>
+      </div>
+      <div class="form-row">
+        <label class="form-label">หมายเหตุ</label>
+        <input class="form-input" id="oi_note" placeholder="หมายเหตุ">
+      </div>
+
+      <details style="margin-top:10px">
+        <summary style="cursor:pointer;color:var(--muted);font-size:0.78rem">📝 ดูข้อความดิบที่ OCR อ่านได้ทั้งหมด (เผื่อ regex แยกฟิลด์ผิด ดูจากตรงนี้แล้วแก้มือด้านบน)</summary>
+        <pre id="ocrRawText" style="margin-top:8px;max-height:180px;overflow-y:auto;white-space:pre-wrap;font-size:0.72rem;color:var(--muted);background:var(--surface2);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--font-mono)"></pre>
+      </details>
     </div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:18px">
       <button class="btn btn-primary" id="imageConfirmBtn" onclick="confirmImageImport()">✅ ยืนยันนำเข้าข้อมูล</button>
@@ -381,6 +644,14 @@
   </div>
 
   <div class="detail-body">
+    <div class="detail-watchlist">
+      <div class="watchlist-search">
+        <input type="text" id="watchlistSearch" placeholder="🔍 ค้นหาหุ้น..." oninput="renderWatchlistSide()">
+      </div>
+      <div class="watchlist-header">รายการหุ้น (คลิกเพื่อสลับ)</div>
+      <div id="watchlistSide" class="watchlist-list"></div>
+    </div>
+
     <div class="detail-main">
       <div class="chart-toolbar">
         <div class="tf-group" id="tfGroup">
@@ -470,26 +741,6 @@
         <div class="side-title">เส้นที่ตีไว้</div>
         <div class="drawn-list" id="drawnList"></div>
       </div>
-    </div>
-  </div>
-</div>
-
-<!-- API KEY MODAL -->
-<div class="modal-overlay" id="apiKeyOverlay">
-  <div class="modal" style="max-width:460px">
-    <button class="close-btn" onclick="closeApiKeyModal()">✕</button>
-    <div class="modal-title">🔑 Claude API Key</div>
-    <div style="font-size:0.8rem;color:var(--muted);margin-bottom:14px;line-height:1.6">
-      ใช้สำหรับให้ AI อ่านข้อมูลจากรูปสลิป Key จะถูกเก็บไว้ใน localStorage ของเบราว์เซอร์นี้เท่านั้น ไม่ถูกส่งไปที่ใดนอกจากเรียก Anthropic API ตรงๆ<br><br>
-      ขอ API Key ได้ที่ <span style="color:var(--accent)">console.anthropic.com</span>
-    </div>
-    <div class="form-row">
-      <label class="form-label">API Key (sk-ant-...)</label>
-      <input class="form-input" id="apiKeyInput" type="password" placeholder="sk-ant-...">
-    </div>
-    <div class="modal-actions">
-      <button class="btn btn-outline" onclick="closeApiKeyModal()">ยกเลิก</button>
-      <button class="btn btn-primary" onclick="saveApiKey()">บันทึก</button>
     </div>
   </div>
 </div>

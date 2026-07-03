@@ -397,14 +397,35 @@ function renderWeeklyChange() {
   // เอาแค่ weeksBack*5 วันล่าสุด (จ-ศ)
   const tradingDays = days.slice(-weeksBack * 5);
 
-  // คำนวณ มูลค่าพอร์ตแต่ละวัน
+  // ✦ FIX: เดิมถ้าหุ้นตัวไหนไม่มี price_history ของวันนั้น จะ fallback ไปใช้ "ราคาสดวันนี้"
+  // (parseFloat(s.price)) แทน ทำให้วันย้อนหลังกลายเป็นค่าผสมระหว่างราคาจริงของบางตัว +
+  // ราคาสดวันนี้ของบางตัว เกิดเป็น % เปลี่ยนแปลงกระโดดผิดปกติ (เช่น -15%, +42%) เพราะ
+  // ราคาสดวันนี้กับราคาจริงย้อนหลังต่างกันมาก โดยเฉพาะช่วงที่ยังเก็บ history ไม่ครบทุกตัว
+  //
+  // แก้เป็น "forward-fill": ใช้ราคาปิดล่าสุดที่มีข้อมูลจริง ณ วันนั้นหรือก่อนหน้า (ไม่กระโดด
+  // ไปอนาคต/ราคาสด) ถ้าหุ้นตัวไหนไม่มีประวัติเลยแม้แต่จุดเดียวก่อนวันนั้น ให้ถือว่าวันนั้น
+  // "คำนวณไม่ได้" (คืนค่า null) แทนที่จะผสมราคาสดเข้าไปแบบผิดๆ
+  const sortedHist = {};
+  stocks.forEach(s => {
+    sortedHist[s.ticker] = [...(h[s.ticker] || [])].sort((a, b) => a.date.localeCompare(b.date));
+  });
+  function priceOnOrBefore(ticker, dateKey) {
+    const arr = sortedHist[ticker];
+    if (!arr || !arr.length) return null;
+    let result = null;
+    for (const rec of arr) {
+      if (rec.date > dateKey) break;
+      result = rec.price;
+    }
+    return result;
+  }
   function portfolioValue(dateKey) {
     let val = 0;
-    stocks.forEach(s => {
-      const hist = (h[s.ticker] || []).find(x => x.date === dateKey);
-      const p = hist ? hist.price : parseFloat(s.price);
+    for (const s of stocks) {
+      const p = priceOnOrBefore(s.ticker, dateKey);
+      if (p === null) return null; // มีอย่างน้อย 1 ตัวที่ไม่มีข้อมูลย้อนหลังถึงวันนี้เลย
       val += p * parseFloat(s.shares);
-    });
+    }
     return val;
   }
 
@@ -452,14 +473,19 @@ function renderWeeklyChange() {
         : week[di - 1];
       const curVal = valMap[dateKey];
       const prvVal = valMap[prevKey];
-      const pct = prvVal > 0 ? ((curVal - prvVal) / prvVal) * 100 : null;
+      const pct = (curVal !== null && prvVal !== null && prvVal > 0) ? ((curVal - prvVal) / prvVal) * 100 : null;
 
-      // ตรวจว่าวันนี้มีข้อมูลราคาจริงไหม (ไม่ใช่ราคาปัจจุบันที่ fallback มา)
-      const hasRealData = stocks.some(s => (h[s.ticker] || []).some(x => x.date === dateKey));
       const isFuture = dateKey > today.toISOString().slice(0, 10);
 
       if (isFuture) return `<td style="padding:5px 8px;text-align:right;color:#2a2e3a;">-</td>`;
-      if (pct === null || !hasRealData) return `<td style="padding:5px 8px;text-align:right;color:#5a6478;">N/A</td>`;
+      if (pct === null) return `<td style="padding:5px 8px;text-align:right;color:#5a6478;">N/A</td>`;
+
+      // ✦ SAFETY NET: พอร์ตกระจายหุ้นหลายตัวแบบนี้ ปกติไม่ควรขยับเกิน ±20%/วัน
+      // ถ้าเกินแปลว่าข้อมูลย้อนหลังน่าจะมีปัญหา (เช่น price_history ผิด/ราคาหลุด) ให้เตือนไว้
+      // ก่อน แทนที่จะโชว์ตัวเลขที่ดูน่าเชื่อถือทั้งที่อาจผิดจากข้อมูลเพี้ยน
+      if (Math.abs(pct) > 20) {
+        return `<td style="padding:5px 8px;text-align:right;color:#f5a623;font-weight:600;" title="ค่าดูผิดปกติ (${pct.toFixed(2)}%) น่าจะมาจากข้อมูล price_history ของวันนี้ผิด/ขาด">⚠️ ${pct.toFixed(1)}%</td>`;
+      }
 
       const color = pct > 0 ? '#00e5a0' : pct < 0 ? '#ff4d6d' : '#5a6478';
       const sign = pct > 0 ? '+' : '';
@@ -468,10 +494,10 @@ function renderWeeklyChange() {
 
     // % รวมทั้งสัปดาห์ (เทียบ ศ. กับ จ. ของสัปดาห์นั้น โดยใช้ค่าก่อนหน้า)
     const weekEndVal = valMap[week[week.length - 1]];
-    const weekPct = weekStartVal > 0 ? ((weekEndVal - weekStartVal) / weekStartVal) * 100 : null;
-    const hasWeekData = stocks.some(s => (h[s.ticker] || []).some(x => week.includes(x.date)));
+    const weekPct = (weekEndVal !== null && weekStartVal !== null && weekStartVal > 0)
+      ? ((weekEndVal - weekStartVal) / weekStartVal) * 100 : null;
     let weekTotal = `<td style="padding:5px 8px;text-align:right;color:#5a6478;">N/A</td>`;
-    if (weekPct !== null && hasWeekData) {
+    if (weekPct !== null) {
       const wcolor = weekPct > 0 ? '#00e5a0' : weekPct < 0 ? '#ff4d6d' : '#5a6478';
       const wsign = weekPct > 0 ? '+' : '';
       weekTotal = `<td style="padding:5px 8px;text-align:right;color:${wcolor};font-weight:700;border-left:1px solid #1e2330;">${wsign}${weekPct.toFixed(2)}%</td>`;

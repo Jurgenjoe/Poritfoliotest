@@ -359,16 +359,22 @@ function renderLineChart(tf) {
   const realPointByDate = {};
   realPoints.forEach(p => { realPointByDate[new Date(p.t).toISOString().slice(0, 10)] = p.m; });
 
-  // ---- เส้นเดียว: มูลค่าพอร์ต โดยเริ่มต้นจาก $100 (ดัชนีอ้างอิง) แล้วไต่ตาม %
-  // การเติบโตจริงของพอร์ต (m = multiplier เทียบทุน) ไปจนถึงวันนี้ ----
-  const INDEX_BASE = 100; // เริ่มนับที่ $100 เสมอ ไม่ว่าทุนจริงจะเป็นเท่าไหร่
+  // ---- เส้นเดียว: เริ่มต้นที่ $100 เป๊ะ แล้วไต่รูปทรงเดียวกับผลตอบแทน % จริงของพอร์ต
+  // แต่ปรับสเกลให้จุดสุดท้าย (วันนี้) จบที่ "มูลค่าพอร์ตจริง" (realTodayUSD) พอดี ไม่ใช่แค่
+  // ดัชนีเล็กๆ อีกต่อไป — คือ remap ช่วง multiplier [1 .. todayMultiplier] เป็นเส้นตรงไปยัง
+  // ช่วงเงินจริง [100 .. realTodayUSD] รูปทรงกราฟ (ขึ้นๆ ลงๆ) เหมือนเดิมทุกจุด แค่สเกลปลายทาง
+  // เปลี่ยนจากดัชนีเล็กๆ เป็นมูลค่าพอร์ตจริงวันนี้ ----
+  const INDEX_BASE = 100; // เริ่มนับที่ $100 เสมอ
+  const mRange = todayMultiplier - 1; // ช่วงของ multiplier จากจุดเริ่ม (1.0) ถึงวันนี้
   const shortRange = (tf === '1W' || tf === '1M');
   const labels = [], values = [], pointColors = [];
   dates.forEach((dateKey) => {
     const isRealPoint = Object.prototype.hasOwnProperty.call(realPointByDate, dateKey);
     const m = isRealPoint ? realPointByDate[dateKey] : estimateAt(new Date(dateKey).getTime(), dateKey);
-    // มูลค่าดัชนี ณ วันนั้น = $100 × multiplier (เริ่ม 100 ไต่ไปตามผลตอบแทน % จริงของพอร์ต)
-    const valUSD = INDEX_BASE * m;
+    // frac = 0 ที่จุดเริ่ม (m=1), frac = 1 ที่วันนี้ (m=todayMultiplier) — remap เชิงเส้นไปเป็น
+    // มูลค่าเงินจริงระหว่าง $100 ถึงมูลค่าพอร์ตจริงวันนี้ (realTodayUSD)
+    const frac = mRange !== 0 ? (m - 1) / mRange : 0;
+    const valUSD = INDEX_BASE + frac * (realTodayUSD - INDEX_BASE);
     const dispVal = currency === 'THB' ? valUSD * THB_RATE : valUSD;
 
     const d = new Date(dateKey);
@@ -401,7 +407,7 @@ function renderLineChart(tf) {
       &nbsp;|&nbsp; ต้นทุนรวม ${fmtCur(totalCostUSD)}
       &nbsp;|&nbsp; มูลค่าจริงวันนี้ ${fmtCur(realTodayUSD)}
       &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (จุดสีเทาคือข้อมูลเก่าที่ยังไม่มี % รายวันจริงบันทึกไว้ — ระบบเมคขึ้นให้ดูเป็นธรรมชาติ โดยยังยึดค่าที่จุดจริงทุกจุดเป๊ะๆ)
-      &nbsp;|&nbsp; กราฟเริ่มนับที่ $100 แล้วไต่ตามผลตอบแทนจริงของพอร์ต`;
+      &nbsp;|&nbsp; กราฟเริ่มที่ $100 แล้วไต่ตามผลตอบแทนจริงของพอร์ต จนจบที่มูลค่าพอร์ตจริงวันนี้`;
   }
 
   const ctx = document.getElementById('lineChart').getContext('2d');

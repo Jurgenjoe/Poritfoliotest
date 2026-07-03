@@ -486,6 +486,12 @@ function computePortfolioDayChangePct() {
     }
     if (!(prevClose > 0)) return;
 
+    // ✦ SAFETY NET: ถ้าหุ้นตัวไหนเดี่ยวๆ ขยับเกิน ±50% ใน 1 วัน แปลว่าราคา prevClose
+    // (มักมาจาก price_history ที่ข้อมูลพัง/ราคาหลุด) น่าจะผิดปกติ — ตัดตัวนั้นทิ้งจากสูตร
+    // แทนที่จะปล่อยให้ตัวเลขเพี้ยนตัวเดียวลากทั้งพอร์ตให้ผิดไปด้วย (ต้นตอของบั๊ก -15.96% ก่อนหน้านี้)
+    const tickerPct = (price - prevClose) / prevClose * 100;
+    if (Math.abs(tickerPct) > 50) return;
+
     num += shares * (price - prevClose);
     den += shares * prevClose;
     coveredValue += shares * price;
@@ -494,7 +500,12 @@ function computePortfolioDayChangePct() {
   if (den <= 0 || totalValue <= 0) return null;
   // ต้องมีข้อมูลราคาปิดก่อนหน้าครอบคลุมพอร์ตอย่างน้อย 60% ของมูลค่า ไม่งั้นตัวเลขจะไม่น่าเชื่อถือ
   if (coveredValue / totalValue < 0.6) return null;
-  return (num / den) * 100;
+
+  const result = (num / den) * 100;
+  // ✦ SAFETY NET: พอร์ตกระจายหุ้นหลายตัว ปกติไม่ควรขยับเกิน ±20%/วัน ถ้าเกิน แปลว่าข้อมูลน่าจะ
+  // ปนเปื้อนอยู่ดี (แม้ผ่านตัวกรองรายตัวมาแล้ว) -> ไม่บันทึกไว้ก่อน รอรอบถัดไปที่ข้อมูลสะอาดกว่า
+  if (Math.abs(result) > 20) return null;
+  return result;
 }
 
 // เรียกทุกครั้งหลัง fetchRealPrices() (และตอนโหลดแอปครั้งแรก) เพื่ออัปเดต/ล็อกค่าของ "วันนี้"

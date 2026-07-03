@@ -46,6 +46,15 @@ jobs:
 
           today = datetime.date.today().isoformat()
 
+          # ---- 0) วันหยุดตลาดหุ้นสหรัฐฯ (NYSE/Nasdaq) ปี 2026 -- ตลาดปิดทั้งวัน ไม่มีการเทรด ----
+          NYSE_HOLIDAYS_2026 = {
+              '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25',
+              '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
+          }
+          if today in NYSE_HOLIDAYS_2026:
+              print(f'📅 {today} เป็นวันหยุดตลาดหุ้นสหรัฐฯ (ตลาดปิดทั้งวัน) -- ข้ามการคำนวณ % วันนี้ (ไม่บันทึกอะไรเลย)')
+              raise SystemExit(0)
+
           # ---- 1) โหลดหุ้นทั้งหมดในพอร์ต (ต้องมีจำนวนหุ้น) ----
           stocks = sb_get('stocks?select=ticker,shares')
           stocks = [s for s in stocks if s.get('ticker') and float(s.get('shares') or 0) > 0]

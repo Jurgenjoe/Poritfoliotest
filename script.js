@@ -272,20 +272,29 @@ function renderLineChart(tf) {
   // % กำไร/ขาดทุนรวมวันนี้ (ตัวเดียวกับที่การ์ดสรุปด้านบนแสดง) — ใช้โชว์บนหัวการ์ดเสมอ ไม่ว่าจะเลือกช่วงเวลาไหน
   const totalPctToday = totalCostUSD > 0 ? ((realTodayUSD - totalCostUSD) / totalCostUSD * 100) : 0;
 
-  // ---- จุดจริงทั้งหมด: ไล่ compound ทีละวันจาก daily_pct ตั้งแต่วันเริ่มลงทุนจริง (ใช้ interpolate เสมอ ไม่ขึ้นกับ timeframe ที่เลือกแสดง) ----
+  // ---- จุดจริงทั้งหมด: ไล่ compound จาก daily_pct (ใช้ interpolate เสมอ ไม่ขึ้นกับ timeframe ที่เลือกแสดง) ----
   // multiplier = มูลค่าพอร์ต ÷ ต้นทุนรวม ณ ขณะนั้น (1.00 = คืนทุนพอดี, 1.10 = กำไรสะสม 10%)
   const finalizedRecs = (_dailyPct || [])
     .filter(r => r.finalized && r.date >= PORTFOLIO_START && r.date <= todayKey)
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const realPoints = [{ t: portfolioStartDate.getTime(), m: 1 }]; // จุดเริ่มลงทุน = ทุน 100% (0% กำไร/ขาดทุน)
-  let multiplier = 1;
-  finalizedRecs.forEach(r => {
-    multiplier *= (1 + r.pct / 100);
-    realPoints.push({ t: new Date(r.date).getTime(), m: multiplier });
-  });
   // จุดสุดท้าย (วันนี้) ใช้มูลค่าจริงตรงๆ เสมอ (แม่นยำ 100% ไม่ผ่านการ compound สะสมที่อาจคลาดเคลื่อนเล็กน้อย)
   const todayMultiplier = totalCostUSD > 0 ? (realTodayUSD / totalCostUSD) : 1;
+
+  // ✦ FIX: ของเดิมไล่ compound "ไปข้างหน้า" โดยเริ่มนับ multiplier = 1.0 (เท่าทุนพอดี) ที่วันแรก
+  // ที่มีข้อมูล daily_pct (ซึ่งเพิ่งเริ่มเก็บได้ไม่กี่สัปดาห์) ทั้งที่วันเริ่มลงทุนจริงคือ
+  // PORTFOLIO_START (ก.พ. 67) — ทำให้ช่วงตั้งแต่ ก.พ. 67 ถึงก่อนวันที่เริ่มมี daily_pct ถูกมองว่า
+  // "เท่าทุนตลอด" (เส้นแบน) แล้วต้องยัดการเติบโตทั้งหมดลงในช่วงไม่กี่สัปดาห์สุดท้าย → กราฟพุ่งตั้งฉาก
+  //
+  // แก้เป็นไล่ compound "ย้อนกลับ" จากมูลค่าจริงวันนี้ (ซึ่งรู้แน่นอน) ผ่าน % รายวันที่บันทึกไว้
+  // ทำให้จุดจริงทุกจุดสอดคล้องกับมูลค่าวันนี้เป๊ะ ไม่มีจุด "รีเซ็ตเป็นเท่าทุน" ผิดที่ผิดทาง
+  const realPoints = [{ t: portfolioStartDate.getTime(), m: 1 }]; // จุดเริ่มลงทุน = ทุน 100% (0% กำไร/ขาดทุน)
+  let multiplier = todayMultiplier;
+  for (let i = finalizedRecs.length - 1; i >= 0; i--) {
+    const r = finalizedRecs[i];
+    realPoints.push({ t: new Date(r.date).getTime(), m: multiplier });
+    multiplier = multiplier / (1 + r.pct / 100); // ถอย 1 วันย้อนกลับ (ก่อนวันนี้จะเปลี่ยน pct%)
+  }
   realPoints.push({ t: today.getTime(), m: todayMultiplier });
   realPoints.sort((a, b) => a.t - b.t);
 
@@ -424,7 +433,7 @@ function renderLineChart(tf) {
 
   const ctx = document.getElementById('lineChart').getContext('2d');
   if (lineChartInst) lineChartInst.destroy();
-  const grad = ctx.createLinearGradient(0, 0, 0, 220);
+  const grad = ctx.createLinearGradient(0, 0, 0, 140);
   grad.addColorStop(0, 'rgba(139,92,246,0.45)');
   grad.addColorStop(1, 'rgba(139,92,246,0.0)');
 

@@ -862,19 +862,19 @@
 .gold-price-box-val { font-family: var(--font-mono); font-weight: 700; font-size: 1rem; color: var(--green); }
 .gold-price-meta { font-size: 0.72rem; color: var(--muted); display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
 
-.portfolio-hero { padding: 24px 24px 18px; }
-.hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; }
-.hero-label { font-size: 0.85rem; color: var(--muted); }
-.hero-value { font-family: var(--font-mono); font-size: 2.2rem; font-weight: 700; color: var(--text); line-height: 1.2; }
-.hero-value-unit { font-size: 1rem; color: var(--muted); font-weight: 600; }
-.hero-thb { font-size: 1rem; color: var(--muted); margin-top: 2px; }
-.hero-gain { font-size: 0.95rem; color: var(--muted); margin-top: 10px; }
+.portfolio-hero { padding: 18px 18px 14px; }
+.hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.hero-label { font-size: 0.78rem; color: var(--muted); }
+.hero-value { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 700; color: var(--text); line-height: 1.2; }
+.hero-value-unit { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
+.hero-thb { font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
+.hero-gain { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
 .hero-gain span { font-weight: 700; }
 .hero-gain span.green { color: var(--green); }
 .hero-gain span.red { color: var(--red); }
-.hero-fxrate { font-size: 0.85rem; color: var(--muted); margin-top: 4px; margin-bottom: 14px; }
-.tf-row { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 14px; justify-content: center; }
-.tf-row .tf-btn { padding: 5px 14px; border-radius: 16px; font-size: .78rem; }
+.hero-fxrate { font-size: 0.72rem; color: var(--muted); margin-top: 4px; margin-bottom: 10px; }
+.tf-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 10px; justify-content: center; }
+.tf-row .tf-btn { padding: 3px 10px; border-radius: 14px; font-size: .7rem; }
 
 /* Timeframe selector buttons */
 .tf-btn {

@@ -85,27 +85,27 @@
   <div class="summary-grid" id="summaryCards"></div>
 
   <!-- CHARTS -->
-  <div class="chart-card portfolio-hero" style="margin-bottom:18px;">
-    <div class="hero-top">
-      <div class="hero-label">มูลค่าสินทรัพย์ทั้งหมด (<span id="heroDateLabel"></span>) <span style="opacity:.5">👁</span></div>
-    </div>
-    <div class="hero-value" id="heroValueUSD">$0.00 <span class="hero-value-unit">USD</span></div>
-    <div class="hero-thb" id="heroValueTHB">≈ ฿0.00 บาท</div>
-    <div class="hero-gain" id="heroGainPct">กำไรของสินทรัพย์ที่ถืออยู่: <span>↗ 0.00%</span></div>
-    <div class="hero-fxrate" id="heroFxRate">อัตราแลกเปลี่ยน: 🇺🇸 1 USD = 0.00 บาท</div>
-    <canvas id="lineChart" height="220"></canvas>
-    <div class="tf-row" id="tfRow">
-      <button class="tf-btn" data-tf="1W" onclick="renderLineChart('1W')">1W</button>
-      <button class="tf-btn" data-tf="1M" onclick="renderLineChart('1M')">1M</button>
-      <button class="tf-btn" data-tf="3M" onclick="renderLineChart('3M')">3M</button>
-      <button class="tf-btn" data-tf="6M" onclick="renderLineChart('6M')">6M</button>
-      <button class="tf-btn" data-tf="YTD" onclick="renderLineChart('YTD')">YTD</button>
-      <button class="tf-btn" data-tf="1Y" onclick="renderLineChart('1Y')">1Y</button>
-      <button class="tf-btn tf-btn-active" data-tf="MAX" onclick="renderLineChart('MAX')">MAX</button>
-    </div>
-    <div id="lineChartInfo" style="font-size:.75rem;color:#5a6478;margin-top:8px;text-align:right;"></div>
-  </div>
   <div class="charts-row">
+    <div class="chart-card portfolio-hero">
+      <div class="hero-top">
+        <div class="hero-label">มูลค่าสินทรัพย์ทั้งหมด (<span id="heroDateLabel"></span>) <span style="opacity:.5">👁</span></div>
+      </div>
+      <div class="hero-value" id="heroValueUSD">$0.00 <span class="hero-value-unit">USD</span></div>
+      <div class="hero-thb" id="heroValueTHB">≈ ฿0.00 บาท</div>
+      <div class="hero-gain" id="heroGainPct">กำไรของสินทรัพย์ที่ถืออยู่: <span>↗ 0.00%</span></div>
+      <div class="hero-fxrate" id="heroFxRate">อัตราแลกเปลี่ยน: 🇺🇸 1 USD = 0.00 บาท</div>
+      <canvas id="lineChart" height="140"></canvas>
+      <div class="tf-row" id="tfRow">
+        <button class="tf-btn" data-tf="1W" onclick="renderLineChart('1W')">1W</button>
+        <button class="tf-btn" data-tf="1M" onclick="renderLineChart('1M')">1M</button>
+        <button class="tf-btn" data-tf="3M" onclick="renderLineChart('3M')">3M</button>
+        <button class="tf-btn" data-tf="6M" onclick="renderLineChart('6M')">6M</button>
+        <button class="tf-btn" data-tf="YTD" onclick="renderLineChart('YTD')">YTD</button>
+        <button class="tf-btn" data-tf="1Y" onclick="renderLineChart('1Y')">1Y</button>
+        <button class="tf-btn tf-btn-active" data-tf="MAX" onclick="renderLineChart('MAX')">MAX</button>
+      </div>
+      <div id="lineChartInfo" style="font-size:.7rem;color:#5a6478;margin-top:8px;text-align:right;"></div>
+    </div>
     <div class="chart-card">
       <div class="chart-title">🥧 สัดส่วนการถือ</div>
       <canvas id="pieChart" height="180"></canvas>
@@ -171,7 +171,6 @@
       <tbody id="tableBody"></tbody>
     </table>
   </div>
-</div>
 
 </div><!-- /main -->
 </div><!-- /tab_portfolio -->

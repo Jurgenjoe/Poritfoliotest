@@ -404,6 +404,13 @@ let _dailyPct = []; // [{ date:'YYYY-MM-DD', pct: number, finalized: bool }]
 let _dayChangeData = {}; // { TICKER: { change, prevClose } } อัปเดตเฉพาะตอน fetchRealPrices() สำเร็จ (ไม่โดน cosmetic jitter ของ tickPrices ทับ)
 let _weeklyOffset = 0; // 0 = สัปดาห์นี้, -1 = สัปดาห์ก่อน, ...
 
+// วันหยุดตลาดหุ้นสหรัฐฯ (NYSE/Nasdaq) ปี 2026 -- ตลาดปิดทั้งวัน ไม่มีการเทรดเลย
+const NYSE_HOLIDAYS_2026 = new Set([
+  '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25',
+  '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
+]);
+function isNyseHoliday(dateKey) { return NYSE_HOLIDAYS_2026.has(dateKey); }
+
 async function loadDailyPctFromSB() {
   try {
     const { data, error } = await sb.from('daily_pct').select('*').order('date', { ascending: true });
@@ -449,12 +456,14 @@ function nyseNow() {
 
 function nyseSessionStatus() {
   const n = nyseNow();
-  const isWeekday = !['Sat', 'Sun'].includes(n.weekday);
+  const isHoliday = isNyseHoliday(n.dateKey);
+  const isWeekday = !['Sat', 'Sun'].includes(n.weekday) && !isHoliday;
   const mins = n.hour * 60 + n.minute;
   const openMins = 9 * 60 + 30, closeMins = 16 * 60;
   return {
     dateKey: n.dateKey,
     isWeekday,
+    isHoliday,
     isOpen: isWeekday && mins >= openMins && mins < closeMins,
     hasClosedToday: isWeekday && mins >= closeMins,
     beforeOpenToday: !isWeekday || mins < openMins
@@ -512,6 +521,7 @@ function computePortfolioDayChangePct() {
 async function updateTodayPctRecord() {
   const sess = nyseSessionStatus();
   const todayKey = sess.dateKey;
+  if (sess.isHoliday) { renderWeeklyChange(); return; } // วันหยุดตลาด -- ไม่คำนวณ ไม่บันทึกอะไรเลย
   const existing = _dailyPct.find(r => r.date === todayKey);
   if (existing?.finalized) return; // ล็อกไปแล้ว ไม่บันทึกทับ
 

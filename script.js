@@ -534,6 +534,16 @@ function weeklyChangeNav(delta, reset) {
   renderWeeklyChange();
 }
 
+// แปลง Date -> 'YYYY-MM-DD' ตามเวลา "ท้องถิ่นของเบราว์เซอร์" (ห้ามใช้ toISOString ตรงนี้ เพราะ
+// toISOString แปลงเป็น UTC ก่อน สำหรับคนไทย (UTC+7) เที่ยงคืนท้องถิ่นจะกลายเป็นบ่าย/เย็นของ "เมื่อวาน"
+// ใน UTC ทำให้วันที่เพี้ยนถอยหลังไป 1 วันทั้งตาราง)
+function localDateKey(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+}
+
 // ---- WEEKLY PORTFOLIO % CHANGE TABLE — แสดงทีละ 1 สัปดาห์ (จ-ศ) พร้อมปุ่มย้อนหลัง/ถัดไป ----
 function renderWeeklyChange() {
   const DOW_TH = ['', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.'];
@@ -558,7 +568,7 @@ function renderWeeklyChange() {
   for (let i = 0; i < 5; i++) {
     const d = new Date(monday);
     d.setDate(monday.getDate() + i);
-    weekDates.push(d.toISOString().slice(0, 10));
+    weekDates.push(localDateKey(d));
   }
 
   // header: วันในสัปดาห์ (ไม่ต้องมีคอลัมน์ "สัปดาห์" แบบเดิมแล้ว เพราะโชว์แค่สัปดาห์เดียว)
@@ -567,14 +577,15 @@ function renderWeeklyChange() {
 
   // label ช่วงวันที่ เช่น "30/6 - 4/7"
   if (rangeLabel) {
-    const f = new Date(weekDates[0]), l = new Date(weekDates[4]);
-    rangeLabel.textContent = `${f.getDate()}/${f.getMonth() + 1} - ${l.getDate()}/${l.getMonth() + 1}` + (_weeklyOffset === 0 ? ' (สัปดาห์นี้)' : '');
+    const [fy, fm, fd] = weekDates[0].split('-').map(Number);
+    const [ly, lm, ld] = weekDates[4].split('-').map(Number);
+    rangeLabel.textContent = `${fd}/${fm} - ${ld}/${lm}` + (_weeklyOffset === 0 ? ' (สัปดาห์นี้)' : '');
   }
 
   const cells = weekDates.map(dateKey => {
     const isFuture = dateKey > nyseSessionStatus().dateKey;
-    const cellDate = new Date(dateKey);
-    const dateLabel = `<div style="font-size:.68rem;color:#454b5c;font-weight:400;">${cellDate.getDate()}/${cellDate.getMonth() + 1}</div>`;
+    const [, mm, dd] = dateKey.split('-').map(Number);
+    const dateLabel = `<div style="font-size:.68rem;color:#454b5c;font-weight:400;">${dd}/${mm}</div>`;
 
     if (isFuture) return `<td style="padding:5px 8px;text-align:right;color:#2a2e3a;">-${dateLabel}</td>`;
 

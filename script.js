@@ -2977,11 +2977,22 @@ async function deleteAsset(id) {
   renderAssetsTab();
 }
 
-function renderAssetsTab() {
+async function renderAssetsTab() {
+  // ต้องมีราคาทองปัจจุบันก่อนถึงจะคำนวณมูลค่าออมทองได้ — ถ้ายังไม่เคยดึง (เช่น เข้าแท็บนี้
+  // เป็นแท็บแรกโดยไม่ได้เปิดแท็บ "ออมทอง" มาก่อน) ให้ดึงราคาก่อน แล้วค่อย render การ์ด
+  if (GOLD_PRICE_THB <= 0) await fetchGoldPrice();
+
   const totalAssets = _assets.reduce((a, x) => a + x.value, 0);
   const totalCostAssets = _assets.reduce((a, x) => a + (x.cost || 0), 0);
   const stocksValueTHB = getStocks().reduce((a, s) => a + parseFloat(s.price) * parseFloat(s.shares), 0) * THB_RATE;
-  const netWorth = totalAssets + stocksValueTHB;
+
+  // มูลค่าปัจจุบันของออมทอง (จากแท็บ "ออมทอง" — น้ำหนักรวมทุกรายการ x ราคารับซื้อปัจจุบัน)
+  const goldWeightTotal = _goldEntries.reduce((a, e) => a + e.weight, 0);
+  const goldCostTotal = _goldEntries.reduce((a, e) => a + e.buy_price * e.weight, 0);
+  const goldValueTHB = GOLD_PRICE_THB * goldWeightTotal;
+  const goldPL = goldValueTHB - goldCostTotal;
+
+  const netWorth = totalAssets + stocksValueTHB + goldValueTHB;
 
   const typeLabels = { crypto: 'Crypto', property: 'อสังหา', gold: 'ทอง', cash: 'เงินสด', fund: 'กองทุน', other: 'อื่น ๆ' };
 
@@ -2989,7 +3000,7 @@ function renderAssetsTab() {
     <div class="card">
       <div class="card-label">Net Worth รวม (THB)</div>
       <div class="card-value" style="color:var(--gold)">฿${fmt(netWorth)}</div>
-      <div class="card-sub">หุ้น + สินทรัพย์อื่น</div>
+      <div class="card-sub">หุ้น + สินทรัพย์อื่น + ออมทอง</div>
     </div>
     <div class="card">
       <div class="card-label">สินทรัพย์อื่น (THB)</div>
@@ -3002,9 +3013,19 @@ function renderAssetsTab() {
       <div class="card-sub">${getStocks().length} ตัว</div>
     </div>
     <div class="card">
+      <div class="card-label">🥇 ออมทอง (มูลค่าปัจจุบัน)</div>
+      <div class="card-value">฿${fmt(goldValueTHB)}</div>
+      <div class="card-sub">${fmt(goldWeightTotal, 4)} บาท @ ฿${fmt(GOLD_PRICE_THB, 0)}/บาท</div>
+    </div>
+    <div class="card">
       <div class="card-label">กำไร/ขาดทุน (สินทรัพย์อื่น)</div>
       <div class="card-value ${totalAssets - totalCostAssets >= 0 ? 'green' : 'red'}">${totalAssets - totalCostAssets >= 0 ? '+' : ''}฿${fmt(totalAssets - totalCostAssets)}</div>
       <div class="card-sub">จากต้นทุน ฿${fmt(totalCostAssets)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">กำไร/ขาดทุน (ออมทอง)</div>
+      <div class="card-value ${goldPL >= 0 ? 'green' : 'red'}">${goldPL >= 0 ? '+' : ''}฿${fmt(goldPL)}</div>
+      <div class="card-sub">จากต้นทุน ฿${fmt(goldCostTotal)}</div>
     </div>
   `;
 
@@ -3028,6 +3049,7 @@ function renderAssetsTab() {
   // Net Worth Chart
   const netData = [
     { label: 'พอร์ตหุ้น', val: stocksValueTHB, color: '#00e5a0' },
+    { label: '🥇 ออมทอง', val: goldValueTHB, color: '#ffd700' },
     ...Object.entries(
       _assets.reduce((acc, a) => { acc[a.type] = (acc[a.type] || 0) + a.value; return acc; }, {})
     ).map(([type, val]) => ({ label: typeLabels[type] || type, val, color: { crypto: '#f5c842', property: '#0099ff', gold: '#ffd700', cash: '#00e5a0', fund: '#a082ff', other: '#5a6478' }[type] || '#888' }))

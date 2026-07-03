@@ -75,11 +75,13 @@ async function loadFromSupabase() {
 
     // Seed history for tickers missing it
     await ensureHistory();
+    await loadDailyPctFromSB();
 
     _loaded = true;
     showToast('✅ โหลดข้อมูลสำเร็จ');
     renderAll();
     autoFetch();
+    updateTodayPctRecord();
     await loadAlertsFromSB();
     await loadDrawingsFromSB();
     startAlertWatcher();
@@ -90,8 +92,10 @@ async function loadFromSupabase() {
     _stocks = JSON.parse(JSON.stringify(defaultStocks));
     _history = {};
     _loaded = true;
+    await loadDailyPctFromSB();
     renderAll();
     autoFetch();
+    updateTodayPctRecord();
     startAlertWatcher();
   }
 }
@@ -378,143 +382,218 @@ function renderLineChart() {
 
 
 
-// ---- WEEKLY PORTFOLIO % CHANGE TABLE (จ-ศ ย้อนหลัง) ----
-function renderWeeklyChange() {
+// ================================================================
+// ==================== DAILY PORTFOLIO % CHANGE =================
+// ================================================================
+// แนวคิด: เก็บ "ตัวเลขเดียวต่อวัน" ที่บอกว่าพอร์ตเราขึ้น/ลงกี่ % ในวันนั้น
+// (แบบเดียวกับที่โบรกเกอร์โชว์ "วันนี้ -1.35%") แทนที่จะคำนวณย้อนหลังจาก
+// price_history ของแต่ละหุ้นแบบเดิม (ซึ่งพังง่ายเวลาข้อมูลบางตัวขาด/เพี้ยน)
+//
+// สูตรที่ใช้ (ใช้ได้กับทุกวัน ไปตลอด):
+//   % เปลี่ยนแปลงพอร์ต = Σ(จำนวนหุ้น_i × Δราคา_i) / Σ(จำนวนหุ้น_i × ราคาปิดก่อนหน้า_i) × 100
+//   โดย Δราคา_i = ราคาล่าสุด − ราคาปิดก่อนหน้า (ราคาปิดก่อนหน้าได้จาก Finnhub "pc" หรือ price_history)
+// นี่คือค่าเฉลี่ยถ่วงน้ำหนักด้วยมูลค่าของ % การเปลี่ยนแปลงแต่ละตัว ตรงกับตัวเลข -1.35% ที่พอร์ตโชว์จริง
+//
+// กฎการบันทึก:
+//   - ตลาดยังไม่เปิดวันนี้ (ก่อน 09:30 ET หรือเสาร์-อาทิตย์) -> บันทึก 0.00 ไปก่อน (ยังไม่ finalize)
+//   - ตลาดเปิดอยู่ (09:30-16:00 ET จ-ศ) -> คำนวณสดจากราคาล่าสุด อัปเดตเรื่อยๆ (ยังไม่ finalize)
+//   - ตลาดปิดแล้ววันนี้ (หลัง 16:00 ET) -> ล็อกค่าสุดท้ายของวันนั้นไว้ (finalize = true) ไม่บันทึกทับอีก
+//   - ข้อมูลเก่าก่อนที่ฟีเจอร์นี้เริ่มใช้งาน -> ไม่มีให้ปล่อยว่าง (แสดง "–")
+
+let _dailyPct = []; // [{ date:'YYYY-MM-DD', pct: number, finalized: bool }]
+let _dayChangeData = {}; // { TICKER: { change, prevClose } } อัปเดตเฉพาะตอน fetchRealPrices() สำเร็จ (ไม่โดน cosmetic jitter ของ tickPrices ทับ)
+let _weeklyOffset = 0; // 0 = สัปดาห์นี้, -1 = สัปดาห์ก่อน, ...
+
+async function loadDailyPctFromSB() {
+  try {
+    const { data, error } = await sb.from('daily_pct').select('*').order('date', { ascending: true });
+    if (error) throw error;
+    _dailyPct = (data || []).map(r => ({ date: r.date, pct: parseFloat(r.pct), finalized: !!r.finalized }));
+  } catch (e) {
+    // ตาราง daily_pct อาจยังไม่ถูกสร้างใน Supabase -> ใช้ localStorage ไปก่อน (ดูวิธีสร้างตารางในคำอธิบายที่แนบมา)
+    try { _dailyPct = JSON.parse(localStorage.getItem('daily_pct') || '[]'); } catch (e2) { _dailyPct = []; }
+  }
+}
+
+function _saveDailyPctLocal() {
+  try { localStorage.setItem('daily_pct', JSON.stringify(_dailyPct)); } catch (e) {}
+}
+
+async function upsertDailyPct(date, pct, finalized) {
+  const idx = _dailyPct.findIndex(r => r.date === date);
+  if (idx >= 0) _dailyPct[idx] = { date, pct, finalized };
+  else _dailyPct.push({ date, pct, finalized });
+  _saveDailyPctLocal();
+  try {
+    const { error } = await sb.from('daily_pct').upsert({ date, pct, finalized }, { onConflict: 'date' });
+    if (error) throw error;
+  } catch (e) {
+    console.warn('[DailyPct] Supabase upsert ไม่สำเร็จ (เก็บไว้ในเครื่องแทน):', e.message || e);
+  }
+}
+
+// เวลาปัจจุบันฝั่งตลาดนิวยอร์ก (ET) — ไม่ต้องพึ่ง library เพิ่ม ใช้ Intl ในตัวเบราว์เซอร์
+function nyseNow() {
+  const parts = new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/New_York', hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', weekday: 'short'
+  }).formatToParts(new Date());
+  const get = t => parts.find(p => p.type === t)?.value;
+  return {
+    dateKey: `${get('year')}-${get('month')}-${get('day')}`,
+    hour: parseInt(get('hour')), minute: parseInt(get('minute')),
+    weekday: get('weekday')
+  };
+}
+
+function nyseSessionStatus() {
+  const n = nyseNow();
+  const isWeekday = !['Sat', 'Sun'].includes(n.weekday);
+  const mins = n.hour * 60 + n.minute;
+  const openMins = 9 * 60 + 30, closeMins = 16 * 60;
+  return {
+    dateKey: n.dateKey,
+    isWeekday,
+    isOpen: isWeekday && mins >= openMins && mins < closeMins,
+    hasClosedToday: isWeekday && mins >= closeMins,
+    beforeOpenToday: !isWeekday || mins < openMins
+  };
+}
+
+// % เปลี่ยนแปลงพอร์ตวันนี้ (ถ่วงน้ำหนักด้วยมูลค่า) จากราคาล่าสุด vs ราคาปิดก่อนหน้า
+// แหล่งข้อมูล: หลัก = Finnhub (แม่นสุด, สดตามตลาดเปิด) / สำรอง = price_history (ราคาปิดที่บันทึกไว้จาก GitHub Action รายวัน)
+function computePortfolioDayChangePct() {
   const stocks = getStocks();
   const h = getHistory();
-  const weeksBack = parseInt(document.getElementById('weeklyWeeksSelect')?.value || '4');
+  const todayKey = nyseSessionStatus().dateKey;
+  let num = 0, den = 0, coveredValue = 0, totalValue = 0;
 
-  // สร้างรายการ วัน จ-ศ ย้อนหลัง N สัปดาห์
-  const days = [];
-  const today = new Date();
-  // ย้อนไปจนครบ weeksBack สัปดาห์ + buffer เผื่อ
-  for (let i = weeksBack * 7 + 7; i >= 0; i--) {
-    const d = new Date(today);
-    d.setDate(today.getDate() - i);
-    const dow = d.getDay(); // 0=อาทิตย์ 6=เสาร์
-    if (dow >= 1 && dow <= 5) days.push(d.toISOString().slice(0, 10));
-  }
-  // เอาแค่ weeksBack*5 วันล่าสุด (จ-ศ)
-  const tradingDays = days.slice(-weeksBack * 5);
-
-  // ✦ FIX: เดิมถ้าหุ้นตัวไหนไม่มี price_history ของวันนั้น จะ fallback ไปใช้ "ราคาสดวันนี้"
-  // (parseFloat(s.price)) แทน ทำให้วันย้อนหลังกลายเป็นค่าผสมระหว่างราคาจริงของบางตัว +
-  // ราคาสดวันนี้ของบางตัว เกิดเป็น % เปลี่ยนแปลงกระโดดผิดปกติ (เช่น -15%, +42%) เพราะ
-  // ราคาสดวันนี้กับราคาจริงย้อนหลังต่างกันมาก โดยเฉพาะช่วงที่ยังเก็บ history ไม่ครบทุกตัว
-  //
-  // แก้เป็น "forward-fill": ใช้ราคาปิดล่าสุดที่มีข้อมูลจริง ณ วันนั้นหรือก่อนหน้า (ไม่กระโดด
-  // ไปอนาคต/ราคาสด) ถ้าหุ้นตัวไหนไม่มีประวัติเลยแม้แต่จุดเดียวก่อนวันนั้น ให้ถือว่าวันนั้น
-  // "คำนวณไม่ได้" (คืนค่า null) แทนที่จะผสมราคาสดเข้าไปแบบผิดๆ
-  const sortedHist = {};
   stocks.forEach(s => {
-    sortedHist[s.ticker] = [...(h[s.ticker] || [])].sort((a, b) => a.date.localeCompare(b.date));
+    const shares = parseFloat(s.shares) || 0;
+    if (shares <= 0) return;
+    const price = parseFloat(s.price);
+    if (!(price > 0)) return;
+    totalValue += shares * price;
+
+    let prevClose = null;
+    const dc = _dayChangeData[s.ticker];
+    if (dc && dc.prevClose > 0) {
+      prevClose = dc.prevClose;
+    } else {
+      const arr = (h[s.ticker] || []).filter(x => x.date < todayKey).sort((a, b) => a.date.localeCompare(b.date));
+      if (arr.length) prevClose = arr[arr.length - 1].price;
+    }
+    if (!(prevClose > 0)) return;
+
+    num += shares * (price - prevClose);
+    den += shares * prevClose;
+    coveredValue += shares * price;
   });
-  function priceOnOrBefore(ticker, dateKey) {
-    const arr = sortedHist[ticker];
-    if (!arr || !arr.length) return null;
-    let result = null;
-    for (const rec of arr) {
-      if (rec.date > dateKey) break;
-      result = rec.price;
-    }
-    return result;
-  }
-  function portfolioValue(dateKey) {
-    let val = 0;
-    for (const s of stocks) {
-      const p = priceOnOrBefore(s.ticker, dateKey);
-      if (p === null) return null; // มีอย่างน้อย 1 ตัวที่ไม่มีข้อมูลย้อนหลังถึงวันนี้เลย
-      val += p * parseFloat(s.shares);
-    }
-    return val;
-  }
 
-  // สร้าง map value ทุกวัน
-  const valMap = {};
-  // ต้องการวันก่อนหน้าวันแรกด้วย (เพื่อคำนวณ % วันแรก)
-  const prevDay = (() => {
-    const d = new Date(tradingDays[0]);
-    d.setDate(d.getDate() - 1);
-    let tries = 0;
-    while (d.getDay() === 0 || d.getDay() === 6) { d.setDate(d.getDate() - 1); if (++tries > 5) break; }
-    return d.toISOString().slice(0, 10);
-  })();
-  [prevDay, ...tradingDays].forEach(k => { valMap[k] = portfolioValue(k); });
+  if (den <= 0 || totalValue <= 0) return null;
+  // ต้องมีข้อมูลราคาปิดก่อนหน้าครอบคลุมพอร์ตอย่างน้อย 60% ของมูลค่า ไม่งั้นตัวเลขจะไม่น่าเชื่อถือ
+  if (coveredValue / totalValue < 0.6) return null;
+  return (num / den) * 100;
+}
 
-  // จัดกลุ่มเป็นสัปดาห์ (จ-ศ)
-  const weeks = [];
-  for (let i = 0; i < tradingDays.length; i += 5) {
-    weeks.push(tradingDays.slice(i, i + 5));
+// เรียกทุกครั้งหลัง fetchRealPrices() (และตอนโหลดแอปครั้งแรก) เพื่ออัปเดต/ล็อกค่าของ "วันนี้"
+async function updateTodayPctRecord() {
+  const sess = nyseSessionStatus();
+  const todayKey = sess.dateKey;
+  const existing = _dailyPct.find(r => r.date === todayKey);
+  if (existing?.finalized) return; // ล็อกไปแล้ว ไม่บันทึกทับ
+
+  if (sess.beforeOpenToday) {
+    // ตลาดยังไม่เปิด (หรือวันหยุดสุดสัปดาห์) -> เป็น 0.00 ไปก่อน
+    if (!existing || existing.pct !== 0 || existing.finalized) await upsertDailyPct(todayKey, 0, false);
+    renderWeeklyChange();
+    return;
   }
 
-  // header: วันในสัปดาห์
+  const livePct = computePortfolioDayChangePct();
+  if (livePct === null) return; // ยังไม่มีข้อมูลราคาพอ รอรอบถัดไป
+  await upsertDailyPct(todayKey, parseFloat(livePct.toFixed(2)), sess.hasClosedToday);
+  renderWeeklyChange();
+}
+
+function weeklyChangeNav(delta, reset) {
+  _weeklyOffset = reset ? 0 : (_weeklyOffset + delta);
+  if (_weeklyOffset > 0) _weeklyOffset = 0; // ห้ามดูล่วงหน้าเกินสัปดาห์นี้
+  renderWeeklyChange();
+}
+
+// ---- WEEKLY PORTFOLIO % CHANGE TABLE — แสดงทีละ 1 สัปดาห์ (จ-ศ) พร้อมปุ่มย้อนหลัง/ถัดไป ----
+function renderWeeklyChange() {
   const DOW_TH = ['', 'จ.', 'อ.', 'พ.', 'พฤ.', 'ศ.'];
   const head = document.getElementById('weeklyChangeHead');
-  head.innerHTML = `<th style="padding:5px 8px;text-align:left;color:#5a6478;">สัปดาห์</th>` +
-    DOW_TH.slice(1).map(d => `<th style="padding:5px 8px;text-align:right;color:#5a6478;">${d}</th>`).join('') +
+  const tbody = document.getElementById('weeklyChangeBody');
+  const rangeLabel = document.getElementById('weeklyRangeLabel');
+  if (!head || !tbody) return;
+
+  // หาวันจันทร์ของ "สัปดาห์นี้" (ถ้าวันนี้เป็น เสาร์/อาทิตย์ ให้ใช้จันทร์ของสัปดาห์ที่ผ่านมา)
+  const today = new Date();
+  const todayDow = today.getDay(); // 0=อา 1=จ ... 6=ส
+  const diffToMonday = todayDow === 0 ? -6 : (1 - todayDow);
+  const thisMonday = new Date(today);
+  thisMonday.setDate(today.getDate() + diffToMonday);
+  thisMonday.setHours(0, 0, 0, 0);
+
+  // ขยับตาม offset (หน่วย: สัปดาห์)
+  const monday = new Date(thisMonday);
+  monday.setDate(thisMonday.getDate() + _weeklyOffset * 7);
+
+  const weekDates = [];
+  for (let i = 0; i < 5; i++) {
+    const d = new Date(monday);
+    d.setDate(monday.getDate() + i);
+    weekDates.push(d.toISOString().slice(0, 10));
+  }
+
+  // header: วันในสัปดาห์ (ไม่ต้องมีคอลัมน์ "สัปดาห์" แบบเดิมแล้ว เพราะโชว์แค่สัปดาห์เดียว)
+  head.innerHTML = DOW_TH.slice(1).map(d => `<th style="padding:5px 8px;text-align:right;color:#5a6478;">${d}</th>`).join('') +
     `<th style="padding:5px 8px;text-align:right;color:#5a6478;">รวม/สัปดาห์</th>`;
 
-  const tbody = document.getElementById('weeklyChangeBody');
-  tbody.innerHTML = '';
+  // label ช่วงวันที่ เช่น "30/6 - 4/7"
+  if (rangeLabel) {
+    const f = new Date(weekDates[0]), l = new Date(weekDates[4]);
+    rangeLabel.textContent = `${f.getDate()}/${f.getMonth() + 1} - ${l.getDate()}/${l.getMonth() + 1}` + (_weeklyOffset === 0 ? ' (สัปดาห์นี้)' : '');
+  }
 
-  weeks.forEach((week, wi) => {
-    const firstDate = new Date(week[0]);
-    const label = `${firstDate.getDate()}/${firstDate.getMonth() + 1}`;
-    let weekStartVal = valMap[prevDay]; // ค่าเริ่มต้นของสัปดาห์แรก ใช้วันก่อนหน้า
-    if (wi > 0) {
-      // สัปดาห์ถัดไป ใช้ค่าสิ้นสัปดาห์ก่อน (ศ. ของสัปดาห์ก่อน)
-      const prevWeekFri = weeks[wi - 1][4] || weeks[wi - 1][weeks[wi - 1].length - 1];
-      weekStartVal = valMap[prevWeekFri];
-    }
+  const cells = weekDates.map(dateKey => {
+    const isFuture = dateKey > nyseSessionStatus().dateKey;
+    const cellDate = new Date(dateKey);
+    const dateLabel = `<div style="font-size:.68rem;color:#454b5c;font-weight:400;">${cellDate.getDate()}/${cellDate.getMonth() + 1}</div>`;
 
-    const cells = week.map((dateKey, di) => {
-      const prevKey = di === 0
-        ? (wi === 0 ? prevDay : (weeks[wi - 1][4] || weeks[wi - 1][weeks[wi - 1].length - 1]))
-        : week[di - 1];
-      const curVal = valMap[dateKey];
-      const prvVal = valMap[prevKey];
-      const pct = (curVal !== null && prvVal !== null && prvVal > 0) ? ((curVal - prvVal) / prvVal) * 100 : null;
+    if (isFuture) return `<td style="padding:5px 8px;text-align:right;color:#2a2e3a;">-${dateLabel}</td>`;
 
-      const isFuture = dateKey > today.toISOString().slice(0, 10);
+    const rec = _dailyPct.find(r => r.date === dateKey);
+    if (!rec) return `<td style="padding:5px 8px;text-align:right;color:#3a4050;">–${dateLabel}</td>`;
 
-      if (isFuture) return `<td style="padding:5px 8px;text-align:right;color:#2a2e3a;">-</td>`;
-      if (pct === null) return `<td style="padding:5px 8px;text-align:right;color:#5a6478;">N/A</td>`;
-
-      // ✦ SAFETY NET: พอร์ตกระจายหุ้นหลายตัวแบบนี้ ปกติไม่ควรขยับเกิน ±20%/วัน
-      // ถ้าเกินแปลว่าข้อมูลย้อนหลังน่าจะมีปัญหา (เช่น price_history ผิด/ราคาหลุด) ให้เตือนไว้
-      // ก่อน แทนที่จะโชว์ตัวเลขที่ดูน่าเชื่อถือทั้งที่อาจผิดจากข้อมูลเพี้ยน
-      if (Math.abs(pct) > 20) {
-        return `<td style="padding:5px 8px;text-align:right;color:#f5a623;font-weight:600;" title="ค่าดูผิดปกติ (${pct.toFixed(2)}%) น่าจะมาจากข้อมูล price_history ของวันนี้ผิด/ขาด">⚠️ ${pct.toFixed(1)}%</td>`;
-      }
-
-      const color = pct > 0 ? '#00e5a0' : pct < 0 ? '#ff4d6d' : '#5a6478';
-      const sign = pct > 0 ? '+' : '';
-      return `<td style="padding:5px 8px;text-align:right;color:${color};font-weight:600;">${sign}${pct.toFixed(2)}%</td>`;
-    });
-
-    // % รวมทั้งสัปดาห์ (เทียบ ศ. กับ จ. ของสัปดาห์นั้น โดยใช้ค่าก่อนหน้า)
-    const weekEndVal = valMap[week[week.length - 1]];
-    const weekPct = (weekEndVal !== null && weekStartVal !== null && weekStartVal > 0)
-      ? ((weekEndVal - weekStartVal) / weekStartVal) * 100 : null;
-    let weekTotal = `<td style="padding:5px 8px;text-align:right;color:#5a6478;">N/A</td>`;
-    if (weekPct !== null) {
-      const wcolor = weekPct > 0 ? '#00e5a0' : weekPct < 0 ? '#ff4d6d' : '#5a6478';
-      const wsign = weekPct > 0 ? '+' : '';
-      weekTotal = `<td style="padding:5px 8px;text-align:right;color:${wcolor};font-weight:700;border-left:1px solid #1e2330;">${wsign}${weekPct.toFixed(2)}%</td>`;
-    }
-
-    // เติมช่องว่างถ้าสัปดาห์ไม่ครบ 5 วัน
-    const padded = [...cells];
-    while (padded.length < 5) padded.push(`<td style="padding:5px 8px;text-align:right;color:#2a2e3a;">-</td>`);
-
-    const isCurrentWeek = wi === weeks.length - 1;
-    const rowBg = isCurrentWeek ? 'background:rgba(0,229,160,0.04);' : '';
-    tbody.innerHTML += `<tr style="${rowBg}border-bottom:1px solid #1e2330;">
-      <td style="padding:5px 8px;color:#5a6478;white-space:nowrap;">${label}</td>
-      ${padded.join('')}
-      ${weekTotal}
-    </tr>`;
+    const pct = rec.pct;
+    const color = pct > 0 ? '#00e5a0' : pct < 0 ? '#ff4d6d' : '#5a6478';
+    const sign = pct > 0 ? '+' : '';
+    const pending = rec.finalized ? '' : ' title="ค่าระหว่างวัน ยังไม่ปิดตลาด"';
+    return `<td style="padding:5px 8px;text-align:right;color:${color};font-weight:600;"${pending}>${sign}${pct.toFixed(2)}%${!rec.finalized ? ' ⏳' : ''}${dateLabel}</td>`;
   });
+
+  // % รวมทั้งสัปดาห์ = compound ของวันที่มีข้อมูลจริงในสัปดาห์นั้น
+  const weekRecs = weekDates.map(dk => _dailyPct.find(r => r.date === dk)).filter(Boolean);
+  let weekTotal = `<td style="padding:5px 8px;text-align:right;color:#5a6478;">–</td>`;
+  if (weekRecs.length) {
+    const compound = weekRecs.reduce((acc, r) => acc * (1 + r.pct / 100), 1);
+    const weekPct = (compound - 1) * 100;
+    const anyPending = weekRecs.some(r => !r.finalized);
+    const wcolor = weekPct > 0 ? '#00e5a0' : weekPct < 0 ? '#ff4d6d' : '#5a6478';
+    const wsign = weekPct > 0 ? '+' : '';
+    weekTotal = `<td style="padding:5px 8px;text-align:right;color:${wcolor};font-weight:700;border-left:1px solid #1e2330;">${wsign}${weekPct.toFixed(2)}%${anyPending ? ' ⏳' : ''}</td>`;
+  }
+
+  const rowBg = _weeklyOffset === 0 ? 'background:rgba(0,229,160,0.04);' : '';
+  tbody.innerHTML = `<tr style="${rowBg}border-bottom:1px solid #1e2330;">
+    ${cells.join('')}
+    ${weekTotal}
+  </tr>`;
 }
 
 
@@ -924,6 +1003,7 @@ async function fetchRealPrices() {
   if (finnhubKeyOk === false) {
     const lbl = document.getElementById('liveLabel');
     if (lbl) lbl.textContent = 'LIVE (sim · Finnhub key ใช้ไม่ได้)';
+    updateTodayPctRecord(); // ยังอัปเดตสถานะ "ก่อนเปิดตลาด = 0.00" ได้แม้ Finnhub ใช้ไม่ได้ (ใช้ price_history สำรอง)
     return;
   }
 
@@ -985,6 +1065,8 @@ async function fetchRealPrices() {
       }
       s.price = r.price;
       updated++;
+      // เก็บ Δราคา/ราคาปิดก่อนหน้าแยกไว้ต่างหาก (tickPrices ทับ livePrices.change ทุกวินาที เลยใช้ตัวนี้แทนสำหรับคำนวณ % รายวันของพอร์ต)
+      _dayChangeData[s.ticker] = { change: r.change, prevClose: r.price - r.change };
     }
   });
   if (updated > 0) {
@@ -1009,6 +1091,8 @@ async function fetchRealPrices() {
   } else {
     lbl.textContent = 'LIVE (sim)';
   }
+
+  updateTodayPctRecord();
 
   clearTimeout(fetchStatusTimer);
   fetchStatusTimer = setTimeout(() => {

@@ -212,28 +212,39 @@ function renderSummary() {
   `;
 }
 
-// ---- LINE CHART: MAX เท่านั้น (หน้าเดียว) ----
-// อิงจาก "จุดจริง" 2 จุด: (1) วันเริ่มลงทุนจริง 1 ก.พ. 67 ด้วยเงินต้นจริง $100
-// และ (2) มูลค่าพอร์ตจริงวันนี้ (คำนวณจากจำนวนหุ้น × ราคาปัจจุบันจริงของแต่ละตัว)
-// ถ้ามีการบันทึกราคาย้อนหลังจริงไว้ (ผ่านหน้า "ประวัติราคา" ของหุ้นแต่ละตัว) ครบทุกตัวที่ถือ ณ วันนั้น
-// จะใช้ค่าจริงวันนั้นแทนจุดประมาณการ ส่วนช่วงที่ไม่มีข้อมูลจริงจะ "ประมาณการเติบโต" แบบ compound
-// ระหว่าง 2 จุดจริงที่ใกล้ที่สุด (ไม่ใช่การสุ่ม/Math.random ใด ๆ ทั้งสิ้น)
+// ---- LINE CHART: % กำไร/ขาดทุนสะสมของพอร์ต (MAX เท่านั้น) ----
+// เดิม: กราฟนี้เคยพล็อตเป็น "มูลค่า $" และอิงจาก "จุดจริง" แค่ 2 จุด (วันเริ่มลงทุน + วันนี้)
+// เท่านั้น ทำให้เส้นเกือบตรงตลอดแล้วมากระตุกพรวดตอนท้าย และไม่ได้เก็บสะสมข้อมูลอะไรเพิ่มเลย
+//
+// แก้ไขใหม่:
+// 1) แกน Y เปลี่ยนเป็น "% กำไร/ขาดทุนสะสมของพอร์ต" (เทียบกับต้นทุนรวม) แทนมูลค่าเป็นตัวเงิน
+//    ตรงกับตัวเลข "กำไร/ขาดทุน" บนการ์ดสรุปด้านบนเป๊ะๆ ที่จุดสุดท้าย (วันนี้)
+// 2) ใช้ตาราง daily_pct (Supabase) ที่ระบบบันทึก "% เปลี่ยนแปลงพอร์ตรายวัน" ไว้ทุกวันที่ตลาดปิด
+//    (ผ่าน updateTodayPctRecord() + GitHub Action update-daily-pct.yml) เป็นข้อมูล "จุดจริง"
+//    โดยไล่ compound ทีละวันจากจุดเริ่มลงทุน (ทุน 0%) มาเรื่อยๆ — ทุกวันที่ตลาดปิดและระบบบันทึกค่า
+//    ใหม่ จุดจริงบนกราฟนี้จะเพิ่มขึ้นเองอัตโนมัติ (เก็บข้อมูลการเติบโตของพอร์ตไปเรื่อยๆ ตามที่ต้องการ)
+// 3) ช่วงก่อนที่จะเริ่มเก็บ daily_pct (หรือวันที่ยังไม่มีข้อมูล) จะ "ประมาณการ" ด้วย compound growth
+//    ระหว่าง 2 จุดจริงที่ใกล้ที่สุด (ไม่สุ่ม/ไม่ใช้ Math.random) เหมือนแนวทางเดิม
 let lineChartInst = null;
-const PORTFOLIO_START = '2024-02-01'; // วันที่เริ่มลงทุนจริง (1 ก.พ. 67) — ใช้เป็นจุดเริ่มแกน x ของกราฟเท่านั้น
+const PORTFOLIO_START = '2024-02-01'; // วันที่เริ่มลงทุนจริง (1 ก.พ. 67) — ใช้เป็นจุดเริ่มแกน x ของกราฟ = ทุน 0%
 
 function renderLineChart() {
   // อัปเดตปุ่ม (เหลือปุ่มเดียวคือ MAX)
   document.querySelectorAll('.tf-btn').forEach(b => b.classList.add('tf-btn-active'));
 
   const stocks = getStocks();
-  const h = getHistory();
   const today = new Date();
   const todayKey = today.toISOString().slice(0, 10);
   const fromDate = new Date(PORTFOLIO_START);
-  // เงินต้นจริง = ต้นทุนรวมของทุกหุ้นที่ถืออยู่ (shares × cost) ไม่ใช่ค่า demo ที่ hardcode ไว้
-  const PORTFOLIO_START_VALUE_USD = stocks.reduce((sum, s) => sum + parseFloat(s.cost) * parseFloat(s.shares), 0);
 
-  // สร้างวันเทรดทุกวัน จ-ศ ตั้งแต่วันเริ่มลงทุนจริงถึงวันนี้
+  // เงินต้นจริง = ต้นทุนรวมของทุกหุ้นที่ถืออยู่ (shares × cost)
+  const totalCostUSD = stocks.reduce((sum, s) => sum + parseFloat(s.cost) * parseFloat(s.shares), 0);
+  // มูลค่าพอร์ตจริงวันนี้ (real): shares × ราคาปัจจุบันจริงของแต่ละหุ้น
+  const realTodayUSD = stocks.reduce((sum, s) => sum + parseFloat(s.price) * parseFloat(s.shares), 0);
+  // % กำไร/ขาดทุนรวมวันนี้ (ตัวเดียวกับที่การ์ดสรุปด้านบนแสดง)
+  const totalPctToday = totalCostUSD > 0 ? ((realTodayUSD - totalCostUSD) / totalCostUSD * 100) : 0;
+
+  // สร้างวันเทรดทุกวัน จ-ศ ตั้งแต่วันเริ่มลงทุนจริงถึงวันนี้ (ไว้ทำ label แกน x)
   const allDates = [];
   const cursor = new Date(fromDate);
   while (cursor <= today) {
@@ -251,28 +262,21 @@ function renderLineChart() {
   const dates = allDates.filter((_, i) => i % step === 0 || i === allDates.length - 1);
   if (dates[0] !== allDates[0]) dates.unshift(allDates[0]);
 
-  // มูลค่าพอร์ตจริงวันนี้ (real): shares × ราคาปัจจุบันจริงของแต่ละหุ้น
-  const realTodayUSD = stocks.reduce((sum, s) => sum + parseFloat(s.price) * parseFloat(s.shares), 0);
+  // ---- จุดจริง: ไล่ compound ทีละวันจาก daily_pct (ที่เก็บสะสมทุกวันตลาดปิด) ----
+  // multiplier = มูลค่าพอร์ต ÷ ต้นทุนรวม ณ ขณะนั้น (1.00 = คืนทุนพอดี, 1.10 = กำไรสะสม 10%)
+  const finalizedRecs = (_dailyPct || [])
+    .filter(r => r.finalized && r.date >= PORTFOLIO_START && r.date <= todayKey)
+    .sort((a, b) => a.date.localeCompare(b.date));
 
-  // หา "จุดจริง" ตรงกลาง: วันที่มีราคาย้อนหลังบันทึกจริงไว้ครบทุกหุ้นที่ถืออยู่ ณ ตอนนี้
-  function realTotalForDate(dateKey) {
-    let total = 0;
-    for (const s of stocks) {
-      const rec = (h[s.ticker] || []).find(x => x.date === dateKey);
-      if (!rec) return null; // ไม่มีข้อมูลจริงของหุ้นตัวนี้ในวันนี้ -> ไม่ถือว่าเป็นจุดจริง
-      total += rec.price * parseFloat(s.shares);
-    }
-    return total;
-  }
-
-  // รวบรวมจุดจริงทั้งหมด (รวมจุดเริ่มต้นและวันนี้) เรียงตามเวลา
-  const realPoints = [{ t: fromDate.getTime(), v: PORTFOLIO_START_VALUE_USD }];
-  dates.forEach(dk => {
-    if (dk === PORTFOLIO_START || dk === todayKey) return;
-    const rv = realTotalForDate(dk);
-    if (rv !== null) realPoints.push({ t: new Date(dk).getTime(), v: rv });
+  const realPoints = [{ t: fromDate.getTime(), m: 1 }]; // จุดเริ่มลงทุน = ทุน 100% (0% กำไร/ขาดทุน)
+  let multiplier = 1;
+  finalizedRecs.forEach(r => {
+    multiplier *= (1 + r.pct / 100);
+    realPoints.push({ t: new Date(r.date).getTime(), m: multiplier });
   });
-  realPoints.push({ t: today.getTime(), v: realTodayUSD });
+  // จุดสุดท้าย (วันนี้) ใช้มูลค่าจริงตรงๆ เสมอ (แม่นยำ 100% ไม่ผ่านการ compound สะสมที่อาจคลาดเคลื่อนเล็กน้อย)
+  const todayMultiplier = totalCostUSD > 0 ? (realTodayUSD / totalCostUSD) : 1;
+  realPoints.push({ t: today.getTime(), m: todayMultiplier });
   realPoints.sort((a, b) => a.t - b.t);
 
   // ประมาณการเติบโตแบบ compound ระหว่างจุดจริง 2 จุดที่ใกล้ที่สุด (ไม่สุ่ม)
@@ -281,57 +285,57 @@ function renderLineChart() {
     for (let i = 0; i < realPoints.length - 1; i++) {
       if (ts >= realPoints[i].t && ts <= realPoints[i + 1].t) { lo = realPoints[i]; hi = realPoints[i + 1]; break; }
     }
-    if (hi.t === lo.t) return lo.v;
+    if (hi.t === lo.t) return lo.m;
     const frac = (ts - lo.t) / (hi.t - lo.t);
-    if (lo.v > 0 && hi.v > 0) return lo.v * Math.pow(hi.v / lo.v, frac); // compound growth ระหว่าง 2 จุดจริง
-    return lo.v + (hi.v - lo.v) * frac; // เผื่อกรณีค่าติดลบ/ศูนย์
+    if (lo.m > 0 && hi.m > 0) return lo.m * Math.pow(hi.m / lo.m, frac); // compound growth ระหว่าง 2 จุดจริง
+    return lo.m + (hi.m - lo.m) * frac; // เผื่อกรณีค่าติดลบ/ศูนย์
   }
 
-  const realDateSet = new Set([PORTFOLIO_START, todayKey, ...realPoints.map(p => new Date(p.t).toISOString().slice(0,10))]);
+  const realPointByDate = {};
+  realPoints.forEach(p => { realPointByDate[new Date(p.t).toISOString().slice(0, 10)] = p.m; });
 
   const labels = [], values = [], pointColors = [];
   dates.forEach((dateKey) => {
-    const isRealPoint = dateKey === PORTFOLIO_START || dateKey === todayKey || realTotalForDate(dateKey) !== null;
-    const usdVal = isRealPoint
-      ? (dateKey === PORTFOLIO_START ? PORTFOLIO_START_VALUE_USD : (dateKey === todayKey ? realTodayUSD : realTotalForDate(dateKey)))
-      : estimateAt(new Date(dateKey).getTime());
-    const displayVal = parseFloat((currency === 'THB' ? usdVal * THB_RATE : usdVal).toFixed(2));
+    const isRealPoint = Object.prototype.hasOwnProperty.call(realPointByDate, dateKey);
+    const m = isRealPoint ? realPointByDate[dateKey] : estimateAt(new Date(dateKey).getTime());
+    const pct = (m - 1) * 100;
 
     const d = new Date(dateKey);
     const lbl = `${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
 
     labels.push(lbl);
-    values.push(displayVal);
+    values.push(parseFloat(pct.toFixed(2)));
     pointColors.push(isRealPoint ? '#00e5a0' : 'rgba(90,100,120,0.5)');
   });
 
-  // % เปลี่ยนแปลงตั้งแต่ต้น (จุดจริง $100 -> มูลค่าจริงวันนี้)
-  const pctChange = ((realTodayUSD - PORTFOLIO_START_VALUE_USD) / PORTFOLIO_START_VALUE_USD * 100).toFixed(2);
+  const pctChange = totalPctToday.toFixed(2);
   const infoEl = document.getElementById('lineChartInfo');
   if (infoEl) {
-    const sign = pctChange >= 0 ? '+' : '';
-    const col = pctChange >= 0 ? '#00e5a0' : '#ff4d6d';
+    const sign = totalPctToday >= 0 ? '+' : '';
+    const col = totalPctToday >= 0 ? '#00e5a0' : '#ff4d6d';
     const nRealPoints = realPoints.length;
     infoEl.innerHTML = `MAX: <span style="color:${col};font-weight:700;">${sign}${pctChange}%</span>
-      &nbsp;|&nbsp; ต้นทุนรวม ${fmtCur(PORTFOLIO_START_VALUE_USD)}
+      &nbsp;|&nbsp; ต้นทุนรวม ${fmtCur(totalCostUSD)}
       &nbsp;|&nbsp; มูลค่าจริงวันนี้ ${fmtCur(realTodayUSD)}
-      &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (จุดสีเทาบนกราฟคือค่าประมาณการระหว่างจุดจริง ไม่ใช่ราคาที่สุ่มขึ้น)`;
+      &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (เก็บสะสมเพิ่มขึ้นทุกวันที่ตลาดปิด — จุดสีเทาคือค่าประมาณการช่วงที่ยังไม่มีข้อมูล % รายวันจริง ไม่ใช่ค่าที่สุ่มขึ้น)`;
   }
 
   const ctx = document.getElementById('lineChart').getContext('2d');
   if (lineChartInst) lineChartInst.destroy();
+  const isPositive = totalPctToday >= 0;
+  const lineColor = isPositive ? '#00e5a0' : '#ff4d6d';
   const grad = ctx.createLinearGradient(0, 0, 0, 220);
-  grad.addColorStop(0, 'rgba(0,229,160,0.2)');
-  grad.addColorStop(1, 'rgba(0,229,160,0.0)');
+  grad.addColorStop(0, isPositive ? 'rgba(0,229,160,0.2)' : 'rgba(255,77,109,0.2)');
+  grad.addColorStop(1, isPositive ? 'rgba(0,229,160,0.0)' : 'rgba(255,77,109,0.0)');
 
   lineChartInst = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
       datasets: [{
-        label: 'มูลค่าพอร์ต',
+        label: '% กำไร/ขาดทุนพอร์ต',
         data: values,
-        borderColor: '#00e5a0',
+        borderColor: lineColor,
         backgroundColor: grad,
         borderWidth: 1.5,
         pointRadius: dates.length > 60 ? 0 : 2, // ซ่อนจุดถ้ามีข้อมูลเยอะ
@@ -353,12 +357,12 @@ function renderLineChart() {
               return dates[idx] || items[0].label;
             },
             label: (item) => {
+              const pct = item.parsed.y;
+              const sign = pct >= 0 ? '+' : '';
               const cur = currency === 'THB' ? '฿' : '$';
-              const val = item.parsed.y;
-              const prev = item.dataIndex > 0 ? values[item.dataIndex - 1] : val;
-              const chg = prev > 0 ? ((val - prev) / prev * 100).toFixed(2) : '0.00';
-              const sign = chg >= 0 ? '+' : '';
-              return `${cur}${fmt(val)}  (${sign}${chg}%)`;
+              const estUSD = totalCostUSD * (1 + pct / 100);
+              const dispVal = currency === 'THB' ? estUSD * THB_RATE : estUSD;
+              return `${sign}${pct.toFixed(2)}%  (${cur}${fmt(dispVal)})`;
             }
           }
         }
@@ -372,7 +376,7 @@ function renderLineChart() {
           grid: { color: 'rgba(255,255,255,0.04)' },
           ticks: {
             color: '#5a6478', font: { size: 10 },
-            callback: v => (currency === 'THB' ? '฿' : '$') + fmt(v, 0)
+            callback: v => (v >= 0 ? '+' : '') + fmt(v, 0) + '%'
           }
         }
       }

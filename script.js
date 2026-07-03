@@ -289,16 +289,44 @@ function renderLineChart(tf) {
   realPoints.push({ t: today.getTime(), m: todayMultiplier });
   realPoints.sort((a, b) => a.t - b.t);
 
-  // ประมาณการเติบโตแบบ compound ระหว่างจุดจริง 2 จุดที่ใกล้ที่สุด (ไม่สุ่ม)
-  function estimateAt(ts) {
+  // เลขสุ่มแบบ deterministic (seed จาก string) — ใช้แทน Math.random เพื่อให้ค่าที่ "เมค" ขึ้นมา
+  // คงที่เหมือนเดิมทุกครั้งที่ re-render กราฟ ไม่กระพริบเปลี่ยนไปมา
+  function pseudoRandom(seedStr) {
+    let h = 2166136261;
+    for (let i = 0; i < seedStr.length; i++) {
+      h ^= seedStr.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return ((h >>> 0) % 100000) / 100000; // 0..1
+  }
+
+  // ประมาณการเติบโตแบบ compound ระหว่างจุดจริง 2 จุดที่ใกล้ที่สุด
+  // + เติมความเป็นธรรมชาติแบบกราฟหุ้นจริง (ขึ้นๆ ลงๆ เล็กน้อยรอบเส้นเทรนด์) ให้ช่วงที่ไม่มีข้อมูลจริงเก่าๆ
+  //   ให้หน้าตาคล้ายตัวอย่างที่แนบมา — ค่าที่เมคนี้ deterministic ตาม seedKey (ไม่เปลี่ยนทุกครั้งที่โหลดใหม่)
+  //   และจะเท่ากับ 0 ที่จุดจริงทั้งสองฝั่งเป๊ะๆ เสมอ (ไม่กระทบตัวเลขจริง)
+  function estimateAt(ts, seedKey) {
     let lo = realPoints[0], hi = realPoints[realPoints.length - 1];
     for (let i = 0; i < realPoints.length - 1; i++) {
       if (ts >= realPoints[i].t && ts <= realPoints[i + 1].t) { lo = realPoints[i]; hi = realPoints[i + 1]; break; }
     }
     if (hi.t === lo.t) return lo.m;
     const frac = (ts - lo.t) / (hi.t - lo.t);
-    if (lo.m > 0 && hi.m > 0) return lo.m * Math.pow(hi.m / lo.m, frac); // compound growth ระหว่าง 2 จุดจริง
-    return lo.m + (hi.m - lo.m) * frac; // เผื่อกรณีค่าติดลบ/ศูนย์
+    let m;
+    if (lo.m > 0 && hi.m > 0) m = lo.m * Math.pow(hi.m / lo.m, frac); // compound growth ระหว่าง 2 จุดจริง
+    else m = lo.m + (hi.m - lo.m) * frac; // เผื่อกรณีค่าติดลบ/ศูนย์
+
+    if (seedKey && frac > 0 && frac < 1) {
+      const r1 = pseudoRandom(seedKey + '_a') - 0.5;
+      const r2 = pseudoRandom(seedKey + '_b') - 0.5;
+      const r3 = pseudoRandom(seedKey + '_c') - 0.5;
+      const envelope = Math.sin(frac * Math.PI); // = 0 ที่ frac 0 และ 1 (จุดจริง) ไม่กระทบค่าจริงเลย
+      const wave = Math.sin(frac * Math.PI * (3 + r1 * 3)) * 0.55
+                 + Math.sin(frac * Math.PI * (8 + r2 * 5)) * 0.30
+                 + Math.sin(frac * Math.PI * (15 + r3 * 6)) * 0.15;
+      const noiseAmp = 0.025; // ความแรงของคลื่นเทียม ~2.5%
+      m = m * (1 + envelope * wave * noiseAmp);
+    }
+    return m;
   }
 
   // สร้างวันเทรดทุกวัน จ-ศ ตั้งแต่จุดเริ่มของ timeframe ที่เลือก ถึงวันนี้ (ไว้ทำ label แกน x)
@@ -326,7 +354,7 @@ function renderLineChart(tf) {
   const labels = [], values = [], pointColors = [];
   dates.forEach((dateKey) => {
     const isRealPoint = Object.prototype.hasOwnProperty.call(realPointByDate, dateKey);
-    const m = isRealPoint ? realPointByDate[dateKey] : estimateAt(new Date(dateKey).getTime());
+    const m = isRealPoint ? realPointByDate[dateKey] : estimateAt(new Date(dateKey).getTime(), dateKey);
     // มูลค่าพอร์ตเป็นตัวเงินจริง ณ วันนั้น (เติบโตตั้งแต่ทุนเริ่มต้น) ไม่ใช่ %
     const valUSD = totalCostUSD * m;
     const dispVal = currency === 'THB' ? valUSD * THB_RATE : valUSD;
@@ -360,7 +388,7 @@ function renderLineChart(tf) {
     infoEl.innerHTML = `ช่วงเวลา: <b>${tf}</b>
       &nbsp;|&nbsp; ต้นทุนรวม ${fmtCur(totalCostUSD)}
       &nbsp;|&nbsp; มูลค่าจริงวันนี้ ${fmtCur(realTodayUSD)}
-      &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (จุดสีเทาคือค่าประมาณการช่วงที่ยังไม่มีข้อมูล % รายวันจริง ไม่ใช่ค่าที่สุ่มขึ้น)`;
+      &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (จุดสีเทาคือข้อมูลเก่าที่ยังไม่มี % รายวันจริงบันทึกไว้ — ระบบเมคขึ้นให้ดูเป็นธรรมชาติ โดยยังยึดค่าที่จุดจริงทุกจุดเป๊ะๆ)`;
   }
 
   const ctx = document.getElementById('lineChart').getContext('2d');

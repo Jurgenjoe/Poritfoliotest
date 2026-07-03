@@ -572,47 +572,48 @@ function renderWeeklyChange() {
   }
 
   // header: วันในสัปดาห์ (ไม่ต้องมีคอลัมน์ "สัปดาห์" แบบเดิมแล้ว เพราะโชว์แค่สัปดาห์เดียว)
-  head.innerHTML = DOW_TH.slice(1).map(d => `<th style="padding:5px 8px;text-align:right;color:#5a6478;">${d}</th>`).join('') +
-    `<th style="padding:5px 8px;text-align:right;color:#5a6478;">รวม/สัปดาห์</th>`;
+  head.innerHTML = DOW_TH.slice(1).map(d => `<th>${d}</th>`).join('') +
+    `<th class="wc-total-head">รวม/สัปดาห์</th>`;
 
   // label ช่วงวันที่ เช่น "30/6 - 4/7"
   if (rangeLabel) {
-    const [fy, fm, fd] = weekDates[0].split('-').map(Number);
-    const [ly, lm, ld] = weekDates[4].split('-').map(Number);
-    rangeLabel.textContent = `${fd}/${fm} - ${ld}/${lm}` + (_weeklyOffset === 0 ? ' (สัปดาห์นี้)' : '');
+    const [, fm, fd] = weekDates[0].split('-').map(Number);
+    const [, lm, ld] = weekDates[4].split('-').map(Number);
+    rangeLabel.innerHTML = `${fd}/${fm} - ${ld}/${lm}` + (_weeklyOffset === 0 ? '<span class="wc-this-week-tag">สัปดาห์นี้</span>' : '');
   }
 
   const cells = weekDates.map(dateKey => {
     const isFuture = dateKey > nyseSessionStatus().dateKey;
     const [, mm, dd] = dateKey.split('-').map(Number);
-    const dateLabel = `<div style="font-size:.68rem;color:#454b5c;font-weight:400;">${dd}/${mm}</div>`;
+    const dateLabel = `<div class="wc-day-date">${dd}/${mm}</div>`;
 
-    if (isFuture) return `<td style="padding:5px 8px;text-align:right;color:#2a2e3a;">-${dateLabel}</td>`;
+    if (isFuture) return `<td class="wc-day-cell wc-future"><div class="wc-day-value flat">–</div>${dateLabel}</td>`;
 
     const rec = _dailyPct.find(r => r.date === dateKey);
-    if (!rec) return `<td style="padding:5px 8px;text-align:right;color:#3a4050;">–${dateLabel}</td>`;
+    if (!rec) return `<td class="wc-day-cell wc-empty"><div class="wc-day-value flat">–</div>${dateLabel}</td>`;
 
     const pct = rec.pct;
-    const color = pct > 0 ? '#00e5a0' : pct < 0 ? '#ff4d6d' : '#5a6478';
+    const cls = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';
     const sign = pct > 0 ? '+' : '';
-    const pending = rec.finalized ? '' : ' title="ค่าระหว่างวัน ยังไม่ปิดตลาด"';
-    return `<td style="padding:5px 8px;text-align:right;color:${color};font-weight:600;"${pending}>${sign}${pct.toFixed(2)}%${!rec.finalized ? ' ⏳' : ''}${dateLabel}</td>`;
+    const title = rec.finalized ? '' : ' title="ค่าระหว่างวัน ยังไม่ปิดตลาด"';
+    const pending = rec.finalized ? '' : '<span class="wc-pending-dot">⏳</span>';
+    return `<td class="wc-day-cell"${title}><div class="wc-day-value ${cls}">${sign}${pct.toFixed(2)}%${pending}</div>${dateLabel}</td>`;
   });
 
   // % รวมทั้งสัปดาห์ = compound ของวันที่มีข้อมูลจริงในสัปดาห์นั้น
   const weekRecs = weekDates.map(dk => _dailyPct.find(r => r.date === dk)).filter(Boolean);
-  let weekTotal = `<td style="padding:5px 8px;text-align:right;color:#5a6478;">–</td>`;
+  let weekTotal = `<td class="wc-total-cell"><div class="wc-day-value flat">–</div><div class="wc-total-label">ไม่มีข้อมูล</div></td>`;
   if (weekRecs.length) {
     const compound = weekRecs.reduce((acc, r) => acc * (1 + r.pct / 100), 1);
     const weekPct = (compound - 1) * 100;
     const anyPending = weekRecs.some(r => !r.finalized);
-    const wcolor = weekPct > 0 ? '#00e5a0' : weekPct < 0 ? '#ff4d6d' : '#5a6478';
-    const wsign = weekPct > 0 ? '+' : '';
-    weekTotal = `<td style="padding:5px 8px;text-align:right;color:${wcolor};font-weight:700;border-left:1px solid #1e2330;">${wsign}${weekPct.toFixed(2)}%${anyPending ? ' ⏳' : ''}</td>`;
+    const cls = weekPct > 0 ? 'up' : weekPct < 0 ? 'down' : 'flat';
+    const sign = weekPct > 0 ? '+' : '';
+    const pending = anyPending ? '<span class="wc-pending-dot">⏳</span>' : '';
+    weekTotal = `<td class="wc-total-cell"><div class="wc-day-value ${cls}">${sign}${weekPct.toFixed(2)}%${pending}</div><div class="wc-total-label">${weekRecs.length}/5 วัน</div></td>`;
   }
 
-  const rowBg = _weeklyOffset === 0 ? 'background:rgba(0,229,160,0.04);' : '';
-  tbody.innerHTML = `<tr style="${rowBg}border-bottom:1px solid #1e2330;">
+  tbody.innerHTML = `<tr>
     ${cells.join('')}
     ${weekTotal}
   </tr>`;

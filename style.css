@@ -877,3 +877,87 @@
 }
 .tf-btn:hover { border-color: var(--green); color: var(--green); }
 .tf-btn-active { background: var(--green); color: #04110c !important; border-color: var(--green) !important; }
+
+/* ==================== WEEKLY PORTFOLIO %% CHANGE (redesigned) ==================== */
+.wc-nav-btn {
+  background: var(--surface2);
+  border: 1px solid var(--muted2);
+  color: var(--muted);
+  width: 26px; height: 26px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: .78rem;
+  display: inline-flex; align-items: center; justify-content: center;
+  transition: all .15s;
+}
+.wc-nav-btn:hover { border-color: var(--accent2); color: var(--accent2); background: rgba(0,153,255,0.08); }
+.wc-today-btn {
+  background: var(--surface2);
+  border: 1px solid var(--muted2);
+  color: var(--muted);
+  padding: 0 10px; height: 26px;
+  border-radius: 7px;
+  cursor: pointer;
+  font-size: .72rem;
+  font-weight: 600;
+  transition: all .15s;
+}
+.wc-today-btn:hover { border-color: var(--accent); color: var(--accent); background: rgba(0,229,160,0.08); }
+.wc-range-label {
+  font-size: .8rem; font-weight: 600; color: var(--text, #e6e9ef);
+  min-width: 128px; text-align: center; white-space: nowrap;
+  font-family: var(--font-mono);
+}
+.wc-range-label .wc-this-week-tag { color: var(--accent); font-weight: 600; font-size: .7rem; margin-left: 4px; }
+
+.wc-table { width: 100%; border-collapse: separate; border-spacing: 6px 0; }
+.wc-table thead th {
+  padding: 2px 6px 8px;
+  text-align: center;
+  color: var(--muted);
+  font-size: .72rem;
+  font-weight: 600;
+  letter-spacing: .3px;
+}
+.wc-table thead th.wc-total-head { color: var(--accent2); }
+
+.wc-day-cell {
+  background: var(--surface2);
+  border: 1px solid rgba(255,255,255,0.05);
+  border-radius: 10px;
+  padding: 10px 6px 8px;
+  text-align: center;
+  vertical-align: middle;
+  min-width: 78px;
+  transition: border-color .15s, transform .15s;
+}
+.wc-day-cell:hover { border-color: var(--muted2); }
+.wc-day-cell.wc-future { opacity: .35; }
+.wc-day-cell.wc-empty { color: var(--muted2); }
+.wc-day-value {
+  font-family: var(--font-mono);
+  font-weight: 700;
+  font-size: .95rem;
+  line-height: 1.3;
+}
+.wc-day-value.up { color: var(--green); }
+.wc-day-value.down { color: var(--red); }
+.wc-day-value.flat { color: var(--muted); }
+.wc-day-date {
+  font-size: .66rem;
+  color: var(--muted);
+  margin-top: 3px;
+  font-family: var(--font-mono);
+}
+.wc-pending-dot { font-size: .62rem; margin-left: 2px; opacity: .85; }
+
+.wc-total-cell {
+  background: linear-gradient(180deg, rgba(0,153,255,0.08), rgba(0,153,255,0.02));
+  border: 1px solid rgba(0,153,255,0.18);
+  border-radius: 10px;
+  padding: 10px 12px 8px;
+  text-align: center;
+  min-width: 96px;
+}
+.wc-total-cell .wc-day-value { font-size: 1.05rem; }
+.wc-total-label { font-size: .62rem; color: var(--muted); margin-top: 3px; font-family: var(--font-mono); }

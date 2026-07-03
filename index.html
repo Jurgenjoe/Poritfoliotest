@@ -205,16 +205,19 @@
     </div>
   </div>
   <div style="margin:18px 0 10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">
-    <span style="color:var(--accent);font-weight:600;font-size:0.9rem">💱 แลกเงิน THB→USD</span>
-    <input class="search-box" type="number" id="txAmount" placeholder="จำนวน THB ที่แลก" style="max-width:160px">
-    <input class="search-box" type="number" id="txRate" placeholder="อัตราแลก (THB/USD)" style="max-width:170px">
+    <select class="dropdown" id="txType" onchange="onTxTypeChange()" style="max-width:230px">
+      <option value="fx_buy">💱 แลกเงิน THB → USD</option>
+      <option value="interest">🏦 ฝากเงิน/ดอกเบี้ย (THB อย่างเดียว ไม่มีอัตราแลก)</option>
+    </select>
+    <input class="search-box" type="number" id="txAmount" placeholder="จำนวน THB" style="max-width:160px">
+    <span id="txRateWrap"><input class="search-box" type="number" id="txRate" placeholder="อัตราแลก (THB/USD)" style="max-width:170px"></span>
     <input class="search-box" type="date" id="txDate" style="max-width:150px">
-    <input class="search-box" type="text" id="txNote" placeholder="หมายเหตุ (เช่น SCB, Wise)" style="max-width:200px">
-    <button class="btn btn-primary" onclick="addWalletTx()">+ บันทึกแลกเงิน</button>
+    <input class="search-box" type="text" id="txNote" placeholder="หมายเหตุ (เช่น SCB, Wise, ดอกเบี้ยออมทรัพย์)" style="max-width:220px">
+    <button class="btn btn-primary" onclick="addWalletTx()">+ บันทึก</button>
   </div>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>วันที่</th><th>THB ที่แลก</th><th>อัตราแลก</th><th>USD ที่ได้</th><th>หมายเหตุ</th><th></th></tr></thead>
+      <thead><tr><th>วันที่</th><th>THB</th><th>อัตราแลก</th><th>USD ที่ได้</th><th>หมายเหตุ</th><th></th></tr></thead>
       <tbody id="walletBody"></tbody>
     </table>
   </div>

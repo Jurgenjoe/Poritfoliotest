@@ -2626,17 +2626,38 @@ async function loadWalletFromSB() {
   }
 }
 
+// สลับฟอร์ม: ถ้าเลือก "ฝากเงิน/ดอกเบี้ย" ไม่ต้องกรอกอัตราแลก (ซ่อนช่องอัตราแลกไปเลย)
+function onTxTypeChange() {
+  const type = document.getElementById('txType').value;
+  const rateWrap = document.getElementById('txRateWrap');
+  const amountEl = document.getElementById('txAmount');
+  if (type === 'interest') {
+    rateWrap.style.display = 'none';
+    amountEl.placeholder = 'จำนวนเงินที่ฝาก/ดอกเบี้ย (THB)';
+  } else {
+    rateWrap.style.display = '';
+    amountEl.placeholder = 'จำนวน THB';
+  }
+}
+
 async function addWalletTx() {
+  const type   = document.getElementById('txType').value;
   const amount = parseFloat(document.getElementById('txAmount').value);
-  const rate   = parseFloat(document.getElementById('txRate').value);
   const date   = document.getElementById('txDate').value || new Date().toISOString().slice(0, 10);
   const note   = document.getElementById('txNote').value.trim();
 
-  if (isNaN(amount) || amount <= 0) { showToast('กรุณากรอกจำนวน THB ที่แลก', 'var(--red)'); return; }
-  if (isNaN(rate)   || rate   <= 0) { showToast('กรุณากรอกอัตราแลก THB/USD', 'var(--red)'); return; }
+  if (isNaN(amount) || amount <= 0) { showToast('กรุณากรอกจำนวนเงิน THB', 'var(--red)'); return; }
 
-  const usd = parseFloat((amount / rate).toFixed(4));
-  const tx = { id: 'w' + Date.now(), type: 'fx_buy', amount, rate, usd, date, note };
+  let tx;
+  if (type === 'interest') {
+    // เงินฝาก/ดอกเบี้ย: เก็บเป็น THB ล้วนๆ ไม่มีอัตราแลก ไม่กระทบ avg rate หรือ FX P&L ของการแลกเงินเลย
+    tx = { id: 'w' + Date.now(), type: 'interest', amount, rate: 0, usd: 0, date, note: note || 'ฝากเงิน/ดอกเบี้ย' };
+  } else {
+    const rate = parseFloat(document.getElementById('txRate').value);
+    if (isNaN(rate) || rate <= 0) { showToast('กรุณากรอกอัตราแลก THB/USD', 'var(--red)'); return; }
+    const usd = parseFloat((amount / rate).toFixed(4));
+    tx = { id: 'w' + Date.now(), type: 'fx_buy', amount, rate, usd, date, note };
+  }
   _walletTxs.push(tx);
 
   const { error } = await sb.from('wallet_transactions').insert({ ...tx });
@@ -2645,7 +2666,7 @@ async function addWalletTx() {
     localStorage.setItem('wallet_txs', JSON.stringify(_walletTxs));
     showToast('⚠️ บันทึกลง Supabase ไม่สำเร็จ (เก็บไว้ในเครื่องชั่วคราว): ' + (error.message || error.code), 'var(--red)');
   } else {
-    showToast('💱 บันทึกการแลกเงินแล้ว');
+    showToast(type === 'interest' ? '🏦 บันทึกเงินฝาก/ดอกเบี้ยแล้ว' : '💱 บันทึกการแลกเงินแล้ว');
   }
 
   ['txAmount', 'txRate', 'txNote'].forEach(id => document.getElementById(id).value = '');
@@ -2687,6 +2708,8 @@ function renderWalletTab() {
 
   // sell returns
   const sellReturns = _walletTxs.filter(t => t.type === 'sell_return').reduce((a, t) => a + t.amount, 0);
+  // เงินฝาก/ดอกเบี้ย (THB ล้วนๆ ไม่มีอัตราแลก) — แยกออกจากการแลกเงิน ไม่กระทบ avg rate / FX P&L ด้านบนเลย
+  const interestTHB = _walletTxs.filter(t => t.type === 'interest').reduce((a, t) => a + t.amount, 0);
 
   // FX P&L: เปรียบเทียบ avg rate ที่เราแลก vs THB_RATE ปัจจุบัน
   // ถ้าแลกแพง (avgRate > THB_RATE ปัจจุบัน) = ขาดทุนค่าเงิน
@@ -2736,6 +2759,11 @@ function renderWalletTab() {
       <div class="card-value ${sellReturns > 0 ? 'green' : ''}">${sellReturns > 0 ? '+฿' + fmt(sellReturns) : '—'}</div>
       <div class="card-sub">${_walletTxs.filter(t => t.type === 'sell_return').length} รายการ</div>
     </div>
+    <div class="card">
+      <div class="card-label">🏦 เงินฝาก/ดอกเบี้ย (THB)</div>
+      <div class="card-value ${interestTHB > 0 ? 'green' : ''}">${interestTHB > 0 ? '+฿' + fmt(interestTHB) : '—'}</div>
+      <div class="card-sub">${_walletTxs.filter(t => t.type === 'interest').length} รายการ · ไม่ผูกกับอัตราแลกเปลี่ยน</div>
+    </div>
   `;
 
   // Chart: สะสม THB ที่แลก ต่อครั้ง
@@ -2773,24 +2801,26 @@ function renderWalletTab() {
     }
   });
 
-  // Table - แสดงเฉพาะ fx_buy และ sell_return
+  // Table - แสดง fx_buy, sell_return, deposit (legacy) และ interest (ฝาก/ดอกเบี้ย)
   const tbody = document.getElementById('walletBody');
   const txSorted = [..._walletTxs]
-    .filter(t => t.type === 'fx_buy' || t.type === 'sell_return' || t.type === 'deposit')
+    .filter(t => t.type === 'fx_buy' || t.type === 'sell_return' || t.type === 'deposit' || t.type === 'interest')
     .sort((a, b) => b.date.localeCompare(a.date));
   tbody.innerHTML = txSorted.length === 0
-    ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">ยังไม่มีรายการแลกเงิน</td></tr>`
+    ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">ยังไม่มีรายการ</td></tr>`
     : txSorted.map(t => {
       const isSell = t.type === 'sell_return';
-      const isFx = t.type === 'fx_buy' || t.type === 'deposit';
-      const cls = isSell ? 'tx-deposit' : 'tx-exchange';
-      const label = isSell ? '📤 ขายหุ้น' : '💱 แลกเงิน';
+      const isInterest = t.type === 'interest';
+      const label = isSell ? '📤 ขายหุ้น' : isInterest ? '🏦 ฝาก/ดอกเบี้ย' : '💱 แลกเงิน';
+      const amountCell = isSell || isInterest
+        ? `<td class="mono green">+฿${fmt(t.amount)}</td>`
+        : `<td class="mono tx-exchange">-฿${fmt(t.amount)}</td>`;
       return `<tr>
         <td class="mono" style="color:var(--muted)">${t.date}</td>
-        <td class="mono tx-exchange">-฿${fmt(t.amount)}</td>
+        ${amountCell}
         <td class="mono" style="color:var(--muted)">${t.rate > 0 ? t.rate.toFixed(4) : '—'}</td>
-        <td class="mono green">+$${t.usd > 0 ? fmt(t.usd, 4) : '—'}</td>
-        <td style="color:var(--muted);font-size:0.8rem">${t.note || ''}</td>
+        <td class="mono green">${t.usd > 0 ? '+$' + fmt(t.usd, 4) : '—'}</td>
+        <td style="color:var(--muted);font-size:0.8rem">${label}${t.note ? ' · ' + t.note : ''}</td>
         <td><button class="btn-icon del" onclick="deleteWalletTx('${t.id}')">✕</button></td>
       </tr>`;
     }).join('');
@@ -3625,14 +3655,30 @@ async function fetchGoldPrice() {
     const buy = parseFloat(String(bar.buy).replace(/,/g, ''));
     const sell = parseFloat(String(bar.sell).replace(/,/g, ''));
     if (!(buy > 0 && sell > 0)) return null;
-    return { buy, sell, updated: [d.response.update_date, d.response.update_time].filter(Boolean).join(' ') };
+    return { buy, sell, updated: [d.response.update_date, d.response.update_time].filter(Boolean).join(' '),
+             updateDate: d.response.update_date, updateTime: d.response.update_time };
   }
 
+  // แปลง "DD/MM/YYYY" + "HH:MM" (ตีความเป็นเวลาไทย UTC+7 ตามที่ workflow เขียนไว้) -> epoch ms
+  // ไว้เช็คว่าไฟล์แคช gold-price.json เก่าไปหรือยัง (บั๊กเดิม: โค้ดรับค่าจาก cache มาใช้ตรงๆ
+  // โดยไม่เคยเช็คความสดเลย ถึงแม้ comment จะเขียนไว้ว่า "ถ้าข้อมูลเก่าเกิน 2 ชม. ให้ลองแหล่งสด" ก็ตาม
+  // ทำให้เวลา GitHub Action (cron ทุก 30 นาที) หยุดรันเฉยๆ — ซึ่ง GitHub จะปิด scheduled workflow
+  // อัตโนมัติถ้า repo ไม่มี commit ใหม่เกิน 60 วัน — เว็บจะโชว์ราคาเก่าค้างไว้เป็น "ราคาปัจจุบัน" ไปเรื่อยๆ
+  function goldUpdatedToMs(dateStr, timeStr) {
+    if (!dateStr) return null;
+    const [d, m, y] = dateStr.split('/').map(Number);
+    if (!d || !m || !y) return null;
+    let hh = 0, mm = 0;
+    if (timeStr) { const parts = timeStr.split(':').map(Number); hh = parts[0] || 0; mm = parts[1] || 0; }
+    return Date.UTC(y, m - 1, d, hh - 7, mm); // -7 เพื่อแปลงเวลาไทยกลับเป็น UTC
+  }
+
+  const STALE_HOURS = 3; // ตลาดทองในไทยขยับได้ตลอดวันทำการ ถ้าแคชเก่ากว่านี้ถือว่าใช้ไม่ได้แล้ว
+  let staleCandidate = null; // เผื่อแหล่งสดทุกอันล่ม จะได้ใช้ตัวนี้แทน (ดีกว่า default 61000 เดา)
+
   const CHNWT_URL = 'https://api.chnwt.dev/thai-gold-api/latest';
-  // แหล่งแรก: gold-price.json ที่ GitHub Actions อัปเดตทุก 30 นาที (same-origin, ไม่มี CORS)
-  // ถ้าไม่มีหรือข้อมูลเก่าเกิน 2 ชั่วโมง ค่อยลอง CHNWT และ CORS proxy ตามลำดับ
   const attempts = [
-    { url: './gold-price.json', label: 'สมาคมค้าทองคำ (GitHub Actions cache)' },
+    { url: './gold-price.json', label: 'สมาคมค้าทองคำ (GitHub Actions cache)', isLocalCache: true },
     { url: CHNWT_URL, label: 'สมาคมค้าทองคำ (goldtraders.or.th)' },
     { url: 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(CHNWT_URL), label: 'สมาคมค้าทองคำ (ผ่าน CORS proxy)' },
     { url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(CHNWT_URL), label: 'สมาคมค้าทองคำ (ผ่าน CORS proxy สำรอง)' },
@@ -3644,6 +3690,15 @@ async function fetchGoldPrice() {
       const d = await r.json();
       const parsed = extractGoldBar(d);
       if (parsed) {
+        if (src.isLocalCache) {
+          const updatedMs = goldUpdatedToMs(parsed.updateDate, parsed.updateTime);
+          const ageHours = updatedMs ? (Date.now() - updatedMs) / 3600000 : Infinity;
+          if (ageHours > STALE_HOURS) {
+            console.warn(`[Gold] ${src.label} เก่าเกินไป (${ageHours.toFixed(1)} ชม.) — ข้ามไปลองแหล่งสดก่อน`);
+            staleCandidate = { parsed, label: src.label, ageHours };
+            continue; // ไม่ return ทันที ไปลองแหล่งสดถัดไปก่อน
+          }
+        }
         GOLD_PRICE_BUY_THB = parsed.buy;
         GOLD_PRICE_SELL_THB = parsed.sell;
         GOLD_PRICE_THB = parsed.buy; // มูลค่าพอร์ต = ราคารับซื้อ (สิ่งที่จะได้จริงถ้าขายวันนี้)
@@ -3659,6 +3714,18 @@ async function fetchGoldPrice() {
       // ถูกบล็อก, ส่วน error เกี่ยวกับ JSON.parse แปลว่าปลายทางไม่ได้ตอบเป็น JSON จริง
       console.warn(`[Gold] ${src.label} failed:`, e.message);
     }
+  }
+
+  // ---- 1.5) ทุกแหล่งสดล่ม แต่มีแคชเก่า (เกิน 3 ชม.) อยู่ -> ใช้แคชนั้นแทนแต่บอกชัดว่าเก่าแค่ไหน ----
+  // (ยังดีกว่าประมาณการจาก spot หรือ default 61000 เพราะเป็นราคาจริงจากสมาคม แค่ไม่ล่าสุด)
+  if (staleCandidate) {
+    GOLD_PRICE_BUY_THB = staleCandidate.parsed.buy;
+    GOLD_PRICE_SELL_THB = staleCandidate.parsed.sell;
+    GOLD_PRICE_THB = staleCandidate.parsed.buy;
+    GOLD_PRICE_SOURCE = `⚠️ ${staleCandidate.label} (เก่าแล้ว ~${staleCandidate.ageHours.toFixed(1)} ชม. — ตรวจสอบว่า GitHub Action "Update Gold Price" ยังรันอยู่หรือไม่)`;
+    GOLD_PRICE_UPDATED = staleCandidate.parsed.updated;
+    try { localStorage.setItem('gold_price_cache', JSON.stringify({ buy: staleCandidate.parsed.buy, sell: staleCandidate.parsed.sell, updated: staleCandidate.parsed.updated })); } catch (e) {}
+    return GOLD_PRICE_THB;
   }
 
   // ---- 2) สำรองสุดท้าย: ประมาณการจากราคาทองโลก (Spot) แปลงเป็น THB/บาท ----

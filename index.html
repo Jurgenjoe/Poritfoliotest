@@ -323,7 +323,11 @@
   <div class="chart-card" style="margin-top:18px">
     <div class="chart-title">➕ เพิ่มรายการซื้อทอง</div>
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
-      <input class="search-box" type="number" id="g_buyPrice" placeholder="ราคาที่ซื้อ (THB/บาททอง)" style="max-width:200px">
+      <input class="search-box" type="number" id="g_buyPrice" placeholder="ราคาที่ซื้อ" style="max-width:160px">
+      <select class="dropdown" id="g_priceMode">
+        <option value="rate">฿/บาททอง (อัตรา)</option>
+        <option value="total">ยอดรวมที่จ่าย</option>
+      </select>
       <input class="search-box" type="number" id="g_weight" placeholder="น้ำหนัก (บาทหรือกรัม)" style="max-width:180px">
       <select class="dropdown" id="g_unit">
         <option value="baht">บาททอง</option>
@@ -332,6 +336,9 @@
       <input class="search-box" type="date" id="g_date" style="max-width:150px">
       <input class="search-box" type="text" id="g_note" placeholder="หมายเหตุ" style="max-width:180px">
       <button class="btn btn-primary" onclick="addGoldEntry()">+ เพิ่ม</button>
+    </div>
+    <div style="margin-top:8px;font-size:0.78rem;color:var(--muted)">
+      💡 ถ้าคุณจ่ายเป็นก้อนเดียว (เช่น จ่าย 2,600 บาท ซื้อทอง 1 กรัม) ให้เลือก "ยอดรวมที่จ่าย" ระบบจะคำนวณอัตรา/บาททองให้เอง — ไม่ต้องมานั่งหารเลขเอง
     </div>
   </div>
 

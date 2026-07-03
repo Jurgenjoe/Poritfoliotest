@@ -3910,11 +3910,12 @@ async function initGoldTab() {
 }
 
 async function addGoldEntry() {
-  const buyPrice = parseFloat(document.getElementById('g_buyPrice').value);
-  const weight   = parseFloat(document.getElementById('g_weight').value);
-  const unit     = document.getElementById('g_unit').value;
-  const date     = document.getElementById('g_date').value || new Date().toISOString().slice(0, 10);
-  const note     = document.getElementById('g_note').value.trim();
+  const buyPrice  = parseFloat(document.getElementById('g_buyPrice').value);
+  const priceMode = document.getElementById('g_priceMode').value; // 'rate' = ต่อบาททอง, 'total' = ยอดรวมที่จ่าย
+  const weight    = parseFloat(document.getElementById('g_weight').value);
+  const unit      = document.getElementById('g_unit').value;
+  const date      = document.getElementById('g_date').value || new Date().toISOString().slice(0, 10);
+  const note      = document.getElementById('g_note').value.trim();
 
   if (isNaN(buyPrice) || buyPrice <= 0) { showToast('กรุณากรอกราคาที่ซื้อ', 'var(--red)'); return; }
   if (isNaN(weight)   || weight   <= 0) { showToast('กรุณากรอกน้ำหนัก', 'var(--red)'); return; }
@@ -3923,9 +3924,17 @@ async function addGoldEntry() {
   const weightBaht = unit === 'gram' ? parseFloat((weight / GOLD_GRAM_PER_BAHT).toFixed(6)) : weight;
   const weightGram = unit === 'gram' ? weight : parseFloat((weight * GOLD_GRAM_PER_BAHT).toFixed(4));
 
+  // ✦ FIX: เดิมเก็บ buy_price ตรงๆ ตามที่กรอก โดยสมมติว่าเป็น "อัตรา/บาททอง" เสมอ
+  // แต่ถ้าผู้ใช้กรอกเป็น "ยอดรวมที่จ่าย" จริงๆ (เช่น จ่าย 2,600 บาทซื้อทอง 1 กรัม) ระบบจะเอา
+  // ยอดนั้นไปคูณกับน้ำหนักซ้ำอีกทีตอนคำนวณ (cost = buy_price × weight) ทำให้ต้นทุนที่ใช้คำนวณ
+  // เพี้ยนไปมาก (ต่ำเกินจริงหลายสิบเท่า) กำไร % เลยพุ่งเกินจริง (เช่น +2448%) — ตอนนี้ถ้าเลือกโหมด
+  // "ยอดรวมที่จ่าย" จะหารด้วยน้ำหนัก (บาททอง) ก่อนเก็บ ให้ buy_price เป็นอัตรา/บาททองเสมอ ตรงกับที่
+  // renderGoldTab() คาดหวัง (cost = buy_price × weight ถึงจะตรงกับยอดที่จ่ายจริง)
+  const buyRatePerBaht = priceMode === 'total' ? parseFloat((buyPrice / weightBaht).toFixed(2)) : buyPrice;
+
   const entry = {
     id: 'g' + Date.now(),
-    buy_price: buyPrice,   // THB ต่อ บาททอง
+    buy_price: buyRatePerBaht,   // THB ต่อ บาททอง (เก็บเป็นอัตราเสมอ ไม่ว่าจะกรอกโหมดไหน)
     weight: weightBaht,    // บาททอง
     weight_gram: weightGram,
     unit: 'baht',

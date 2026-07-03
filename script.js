@@ -1286,10 +1286,19 @@ function tickPrices() {
   updateLiveSummary();
   updateTape();
   // line chart's live-updating last point also anchors to REAL price, not the jittered one
+  // ✦ FIX: เดิมเอา "มูลค่าพอร์ตเป็นตัวเงินจริง" (เช่น $20,597) มาแปะทับจุดสุดท้ายตรงๆ
+  // แต่กราฟตอนนี้เปลี่ยนเป็นดัชนีเริ่มที่ $100 แล้ว (ดู renderLineChart) การเอาค่าเงินจริงมาแปะ
+  // จะทำให้จุดสุดท้ายกระโดดไปสเกลเงินจริง (Y แกนเด้งเป็น $0-25,000 เส้นที่เหลือแบนติดพื้น)
+  // ต้องแปลงเป็น multiplier เทียบต้นทุนก่อน แล้วคูณด้วย $100 เหมือนตอน render ให้สเกลตรงกัน
   if (lineChartInst) {
-    let total = 0;
-    stocks.forEach(s => { total += parseFloat(s.price) * parseFloat(s.shares); });
-    const val = currency==='THB' ? total*THB_RATE : total;
+    let total = 0, totalCostUSD = 0;
+    stocks.forEach(s => {
+      total += parseFloat(s.price) * parseFloat(s.shares);
+      totalCostUSD += parseFloat(s.cost) * parseFloat(s.shares);
+    });
+    const m = totalCostUSD > 0 ? (total / totalCostUSD) : 1;
+    const idxVal = 100 * m; // เดียวกับ INDEX_BASE ใน renderLineChart
+    const val = currency==='THB' ? idxVal*THB_RATE : idxVal;
     const data = lineChartInst.data.datasets[0].data;
     data[data.length-1] = parseFloat(val.toFixed(2));
     lineChartInst.update('none');

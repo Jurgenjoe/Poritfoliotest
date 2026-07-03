@@ -359,17 +359,44 @@ function renderLineChart(tf) {
   const realPointByDate = {};
   realPoints.forEach(p => { realPointByDate[new Date(p.t).toISOString().slice(0, 10)] = p.m; });
 
-  // ---- เส้นเดียว: มูลค่าพอร์ต โดยเริ่มต้นจาก $100 (ดัชนีอ้างอิง) แล้วไต่ตาม %
-  // การเติบโตจริงของพอร์ต (m = multiplier เทียบทุน) ไปจนถึงวันนี้ ----
-  const INDEX_BASE = 100; // เริ่มนับที่ $100 เสมอ ไม่ว่าทุนจริงจะเป็นเท่าไหร่
+  // ---- เส้น "เงินลงทุนสะสม" (ทุนจริงที่ใส่เข้ามาแต่ละช่วง) ----
+  // ใช้ข้อมูลจริงจาก import_history (ประวัติ Import ใบยืนยันซื้อขาย) ถ้ามี — cumulative
+  // ของยอดซื้อ (BUY) ลบยอดขาย (SELL) เรียงตามวันที่จริง ไม่ใช่การประมาณเส้นตรง
+  // ถ้ายังไม่มีข้อมูล import_history เลย (เช่น import PDF ยังไม่เคยทำ) จะ fallback เป็น
+  // เส้นไล่ระดับแบบง่ายจาก 0 ไปสิ้นสุดที่ต้นทุนรวมวันนี้แทน (เพื่อยังมีเส้นอ้างอิงให้ดู)
+  const buyTxs = (typeof _importHistory !== 'undefined' ? _importHistory : [])
+    .filter(h => h.effective_date)
+    .map(h => ({
+      date: h.effective_date,
+      usd: (parseFloat(h.gross_thb) || 0) / (parseFloat(h.fx_rate) || THB_RATE) * (h.tx_type === 'SELL' ? -1 : 1)
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
+  const hasRealCapitalData = buyTxs.length > 0;
+  let capitalCum = 0, capitalIdx = 0;
+  const capitalValues = [];
+
   const shortRange = (tf === '1W' || tf === '1M');
   const labels = [], values = [], pointColors = [];
   dates.forEach((dateKey) => {
     const isRealPoint = Object.prototype.hasOwnProperty.call(realPointByDate, dateKey);
     const m = isRealPoint ? realPointByDate[dateKey] : estimateAt(new Date(dateKey).getTime(), dateKey);
-    // มูลค่าดัชนี ณ วันนั้น = $100 × multiplier (เริ่ม 100 ไต่ไปตามผลตอบแทน % จริงของพอร์ต)
-    const valUSD = INDEX_BASE * m;
+    // มูลค่าพอร์ตเป็นตัวเงินจริง ณ วันนั้น (เติบโตตั้งแต่ทุนเริ่มต้น) ไม่ใช่ %
+    const valUSD = totalCostUSD * m;
     const dispVal = currency === 'THB' ? valUSD * THB_RATE : valUSD;
+
+    // เส้นเงินลงทุนสะสม ณ วันเดียวกัน
+    let capUSD;
+    if (hasRealCapitalData) {
+      while (capitalIdx < buyTxs.length && buyTxs[capitalIdx].date <= dateKey) {
+        capitalCum += buyTxs[capitalIdx].usd; capitalIdx++;
+      }
+      capUSD = Math.max(0, capitalCum);
+    } else {
+      const startTime = portfolioStartDate.getTime(), endTime = today.getTime();
+      const frac = endTime > startTime ? (new Date(dateKey).getTime() - startTime) / (endTime - startTime) : 1;
+      capUSD = totalCostUSD * Math.max(0, Math.min(1, frac));
+    }
+    capitalValues.push(parseFloat((currency === 'THB' ? capUSD * THB_RATE : capUSD).toFixed(2)));
 
     const d = new Date(dateKey);
     const lbl = shortRange ? `${d.getDate()}/${d.getMonth() + 1}` : `${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
@@ -401,7 +428,7 @@ function renderLineChart(tf) {
       &nbsp;|&nbsp; ต้นทุนรวม ${fmtCur(totalCostUSD)}
       &nbsp;|&nbsp; มูลค่าจริงวันนี้ ${fmtCur(realTodayUSD)}
       &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (จุดสีเทาคือข้อมูลเก่าที่ยังไม่มี % รายวันจริงบันทึกไว้ — ระบบเมคขึ้นให้ดูเป็นธรรมชาติ โดยยังยึดค่าที่จุดจริงทุกจุดเป๊ะๆ)
-      &nbsp;|&nbsp; กราฟเริ่มนับที่ $100 แล้วไต่ตามผลตอบแทนจริงของพอร์ต`;
+      &nbsp;|&nbsp; เส้นเงินลงทุนสะสม: ${hasRealCapitalData ? 'จากประวัติ Import จริง' : 'ประมาณการ (ยังไม่มีประวัติ Import)'}`;
   }
 
   const ctx = document.getElementById('lineChart').getContext('2d');
@@ -415,7 +442,7 @@ function renderLineChart(tf) {
     data: {
       labels,
       datasets: [{
-        label: 'มูลค่าพอร์ต (เริ่มจาก $100)',
+        label: 'มูลค่าพอร์ต',
         data: values,
         borderColor: '#8b5cf6',
         backgroundColor: grad,
@@ -425,6 +452,18 @@ function renderLineChart(tf) {
         pointBackgroundColor: pointColors,
         tension: 0.3,
         fill: true
+      }, {
+        // ✦ NEW: เส้นเงินลงทุนสะสม (ทุนจริงที่ใส่เข้ามา) เทียบเคียงกับมูลค่าพอร์ต
+        label: 'เงินลงทุนสะสม',
+        data: capitalValues,
+        borderColor: '#5a6478',
+        borderDash: [4, 3],
+        backgroundColor: 'transparent',
+        borderWidth: 1.5,
+        pointRadius: 0,
+        pointHoverRadius: 3,
+        tension: 0,
+        fill: false
       }]
     },
     options: {

@@ -226,49 +226,59 @@ function renderSummary() {
 // 3) ช่วงก่อนที่จะเริ่มเก็บ daily_pct (หรือวันที่ยังไม่มีข้อมูล) จะ "ประมาณการ" ด้วย compound growth
 //    ระหว่าง 2 จุดจริงที่ใกล้ที่สุด (ไม่สุ่ม/ไม่ใช้ Math.random) เหมือนแนวทางเดิม
 let lineChartInst = null;
+let _lineChartTF = 'MAX'; // จำ timeframe ล่าสุดที่เลือก (คงไว้เวลากราฟ re-render จาก tick ราคา)
 const PORTFOLIO_START = '2024-02-01'; // วันที่เริ่มลงทุนจริง (1 ก.พ. 67) — ใช้เป็นจุดเริ่มแกน x ของกราฟ = ทุน 0%
 
-function renderLineChart() {
-  // อัปเดตปุ่ม (เหลือปุ่มเดียวคือ MAX)
-  document.querySelectorAll('.tf-btn').forEach(b => b.classList.add('tf-btn-active'));
+const THAI_MONTHS_ABBR = ['ม.ค.','ก.พ.','มี.ค.','เม.ย.','พ.ค.','มิ.ย.','ก.ค.','ส.ค.','ก.ย.','ต.ค.','พ.ย.','ธ.ค.'];
+function formatThaiDateShort(d) {
+  const buddhistYear = (d.getFullYear() + 543) % 100;
+  return `${d.getDate()} ${THAI_MONTHS_ABBR[d.getMonth()]} ${buddhistYear}`;
+}
+
+// คำนวณวันเริ่มต้นของแต่ละ timeframe (คลิปไม่ให้เกินวันที่เริ่มลงทุนจริง PORTFOLIO_START)
+function tfStartDate(tf, today, portfolioStartDate) {
+  const d = new Date(today);
+  switch (tf) {
+    case '1W': d.setDate(d.getDate() - 7); break;
+    case '1M': d.setMonth(d.getMonth() - 1); break;
+    case '3M': d.setMonth(d.getMonth() - 3); break;
+    case '6M': d.setMonth(d.getMonth() - 6); break;
+    case 'YTD': d.setMonth(0, 1); break;
+    case '1Y': d.setFullYear(d.getFullYear() - 1); break;
+    case 'MAX': default: return new Date(portfolioStartDate);
+  }
+  return d < portfolioStartDate ? new Date(portfolioStartDate) : d;
+}
+
+// ---- กราฟ: มูลค่าพอร์ตทั้งหมด (สะสมตั้งแต่วันเริ่มลงทุน) รองรับเลือกช่วงเวลา 1W/1M/3M/6M/YTD/1Y/MAX ----
+function renderLineChart(tf) {
+  if (tf) _lineChartTF = tf; else tf = _lineChartTF;
+
+  // อัปเดตปุ่ม active
+  document.querySelectorAll('#tfRow .tf-btn').forEach(b => {
+    b.classList.toggle('tf-btn-active', b.dataset.tf === tf);
+  });
 
   const stocks = getStocks();
   const today = new Date();
   const todayKey = today.toISOString().slice(0, 10);
-  const fromDate = new Date(PORTFOLIO_START);
+  const portfolioStartDate = new Date(PORTFOLIO_START);
+  const fromDate = tfStartDate(tf, today, portfolioStartDate);
 
   // เงินต้นจริง = ต้นทุนรวมของทุกหุ้นที่ถืออยู่ (shares × cost)
   const totalCostUSD = stocks.reduce((sum, s) => sum + parseFloat(s.cost) * parseFloat(s.shares), 0);
   // มูลค่าพอร์ตจริงวันนี้ (real): shares × ราคาปัจจุบันจริงของแต่ละหุ้น
   const realTodayUSD = stocks.reduce((sum, s) => sum + parseFloat(s.price) * parseFloat(s.shares), 0);
-  // % กำไร/ขาดทุนรวมวันนี้ (ตัวเดียวกับที่การ์ดสรุปด้านบนแสดง)
+  // % กำไร/ขาดทุนรวมวันนี้ (ตัวเดียวกับที่การ์ดสรุปด้านบนแสดง) — ใช้โชว์บนหัวการ์ดเสมอ ไม่ว่าจะเลือกช่วงเวลาไหน
   const totalPctToday = totalCostUSD > 0 ? ((realTodayUSD - totalCostUSD) / totalCostUSD * 100) : 0;
 
-  // สร้างวันเทรดทุกวัน จ-ศ ตั้งแต่วันเริ่มลงทุนจริงถึงวันนี้ (ไว้ทำ label แกน x)
-  const allDates = [];
-  const cursor = new Date(fromDate);
-  while (cursor <= today) {
-    const dow = cursor.getDay();
-    if (dow >= 1 && dow <= 5) allDates.push(cursor.toISOString().slice(0, 10));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  if (allDates.length === 0 || allDates[allDates.length - 1] !== todayKey) allDates.push(todayKey);
-
-  // ลดจุดข้อมูลให้พอดีกราฟ (แสดงสูงสุดประมาณ 120 จุด) แต่ต้องเก็บวันแรกและวันนี้ไว้เสมอ
-  let step = 1;
-  if (allDates.length > 500) step = 5;
-  else if (allDates.length > 250) step = 3;
-  else if (allDates.length > 120) step = 2;
-  const dates = allDates.filter((_, i) => i % step === 0 || i === allDates.length - 1);
-  if (dates[0] !== allDates[0]) dates.unshift(allDates[0]);
-
-  // ---- จุดจริง: ไล่ compound ทีละวันจาก daily_pct (ที่เก็บสะสมทุกวันตลาดปิด) ----
+  // ---- จุดจริงทั้งหมด: ไล่ compound ทีละวันจาก daily_pct ตั้งแต่วันเริ่มลงทุนจริง (ใช้ interpolate เสมอ ไม่ขึ้นกับ timeframe ที่เลือกแสดง) ----
   // multiplier = มูลค่าพอร์ต ÷ ต้นทุนรวม ณ ขณะนั้น (1.00 = คืนทุนพอดี, 1.10 = กำไรสะสม 10%)
   const finalizedRecs = (_dailyPct || [])
     .filter(r => r.finalized && r.date >= PORTFOLIO_START && r.date <= todayKey)
     .sort((a, b) => a.date.localeCompare(b.date));
 
-  const realPoints = [{ t: fromDate.getTime(), m: 1 }]; // จุดเริ่มลงทุน = ทุน 100% (0% กำไร/ขาดทุน)
+  const realPoints = [{ t: portfolioStartDate.getTime(), m: 1 }]; // จุดเริ่มลงทุน = ทุน 100% (0% กำไร/ขาดทุน)
   let multiplier = 1;
   finalizedRecs.forEach(r => {
     multiplier *= (1 + r.pct / 100);
@@ -291,53 +301,84 @@ function renderLineChart() {
     return lo.m + (hi.m - lo.m) * frac; // เผื่อกรณีค่าติดลบ/ศูนย์
   }
 
+  // สร้างวันเทรดทุกวัน จ-ศ ตั้งแต่จุดเริ่มของ timeframe ที่เลือก ถึงวันนี้ (ไว้ทำ label แกน x)
+  const allDates = [];
+  const cursor = new Date(fromDate);
+  while (cursor <= today) {
+    const dow = cursor.getDay();
+    if (dow >= 1 && dow <= 5) allDates.push(cursor.toISOString().slice(0, 10));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  if (allDates.length === 0 || allDates[allDates.length - 1] !== todayKey) allDates.push(todayKey);
+
+  // ลดจุดข้อมูลให้พอดีกราฟ (แสดงสูงสุดประมาณ 120 จุด) แต่ต้องเก็บวันแรกและวันนี้ไว้เสมอ
+  let step = 1;
+  if (allDates.length > 500) step = 5;
+  else if (allDates.length > 250) step = 3;
+  else if (allDates.length > 120) step = 2;
+  const dates = allDates.filter((_, i) => i % step === 0 || i === allDates.length - 1);
+  if (dates[0] !== allDates[0]) dates.unshift(allDates[0]);
+
   const realPointByDate = {};
   realPoints.forEach(p => { realPointByDate[new Date(p.t).toISOString().slice(0, 10)] = p.m; });
 
+  const shortRange = (tf === '1W' || tf === '1M');
   const labels = [], values = [], pointColors = [];
   dates.forEach((dateKey) => {
     const isRealPoint = Object.prototype.hasOwnProperty.call(realPointByDate, dateKey);
     const m = isRealPoint ? realPointByDate[dateKey] : estimateAt(new Date(dateKey).getTime());
-    const pct = (m - 1) * 100;
+    // มูลค่าพอร์ตเป็นตัวเงินจริง ณ วันนั้น (เติบโตตั้งแต่ทุนเริ่มต้น) ไม่ใช่ %
+    const valUSD = totalCostUSD * m;
+    const dispVal = currency === 'THB' ? valUSD * THB_RATE : valUSD;
 
     const d = new Date(dateKey);
-    const lbl = `${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
+    const lbl = shortRange ? `${d.getDate()}/${d.getMonth() + 1}` : `${d.getMonth() + 1}/${String(d.getFullYear()).slice(2)}`;
 
     labels.push(lbl);
-    values.push(parseFloat(pct.toFixed(2)));
-    pointColors.push(isRealPoint ? '#00e5a0' : 'rgba(90,100,120,0.5)');
+    values.push(parseFloat(dispVal.toFixed(2)));
+    pointColors.push(isRealPoint ? '#8b5cf6' : 'rgba(90,100,120,0.5)');
   });
 
-  const pctChange = totalPctToday.toFixed(2);
+  // ---- อัปเดตส่วนหัว (hero): มูลค่ารวมวันนี้, THB equivalent, % กำไรสะสม, อัตราแลกเปลี่ยน ----
+  const heroDateEl = document.getElementById('heroDateLabel');
+  const heroValEl = document.getElementById('heroValueUSD');
+  const heroThbEl = document.getElementById('heroValueTHB');
+  const heroGainEl = document.getElementById('heroGainPct');
+  const heroFxEl = document.getElementById('heroFxRate');
+  if (heroDateEl) heroDateEl.textContent = formatThaiDateShort(today);
+  if (heroValEl) heroValEl.innerHTML = `$${fmt(realTodayUSD)} <span class="hero-value-unit">USD</span>`;
+  if (heroThbEl) heroThbEl.textContent = `≈ ${fmt(realTodayUSD * THB_RATE)} บาท`;
+  if (heroGainEl) {
+    const isPos = totalPctToday >= 0;
+    heroGainEl.innerHTML = `กำไรของสินทรัพย์ที่ถืออยู่: <span class="${isPos ? 'green' : 'red'}">${isPos ? '↗' : '↘'} ${Math.abs(totalPctToday).toFixed(2)}%</span>`;
+  }
+  if (heroFxEl) heroFxEl.textContent = `อัตราแลกเปลี่ยน: 🇺🇸 1 USD = ${THB_RATE.toFixed(2)} บาท`;
+
   const infoEl = document.getElementById('lineChartInfo');
   if (infoEl) {
-    const sign = totalPctToday >= 0 ? '+' : '';
-    const col = totalPctToday >= 0 ? '#00e5a0' : '#ff4d6d';
     const nRealPoints = realPoints.length;
-    infoEl.innerHTML = `MAX: <span style="color:${col};font-weight:700;">${sign}${pctChange}%</span>
+    infoEl.innerHTML = `ช่วงเวลา: <b>${tf}</b>
       &nbsp;|&nbsp; ต้นทุนรวม ${fmtCur(totalCostUSD)}
       &nbsp;|&nbsp; มูลค่าจริงวันนี้ ${fmtCur(realTodayUSD)}
-      &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (เก็บสะสมเพิ่มขึ้นทุกวันที่ตลาดปิด — จุดสีเทาคือค่าประมาณการช่วงที่ยังไม่มีข้อมูล % รายวันจริง ไม่ใช่ค่าที่สุ่มขึ้น)`;
+      &nbsp;|&nbsp; จุดข้อมูลจริง ${nRealPoints} จุด (จุดสีเทาคือค่าประมาณการช่วงที่ยังไม่มีข้อมูล % รายวันจริง ไม่ใช่ค่าที่สุ่มขึ้น)`;
   }
 
   const ctx = document.getElementById('lineChart').getContext('2d');
   if (lineChartInst) lineChartInst.destroy();
-  const isPositive = totalPctToday >= 0;
-  const lineColor = isPositive ? '#00e5a0' : '#ff4d6d';
   const grad = ctx.createLinearGradient(0, 0, 0, 220);
-  grad.addColorStop(0, isPositive ? 'rgba(0,229,160,0.2)' : 'rgba(255,77,109,0.2)');
-  grad.addColorStop(1, isPositive ? 'rgba(0,229,160,0.0)' : 'rgba(255,77,109,0.0)');
+  grad.addColorStop(0, 'rgba(139,92,246,0.45)');
+  grad.addColorStop(1, 'rgba(139,92,246,0.0)');
 
   lineChartInst = new Chart(ctx, {
     type: 'line',
     data: {
       labels,
       datasets: [{
-        label: '% กำไร/ขาดทุนพอร์ต',
+        label: 'มูลค่าพอร์ต',
         data: values,
-        borderColor: lineColor,
+        borderColor: '#8b5cf6',
         backgroundColor: grad,
-        borderWidth: 1.5,
+        borderWidth: 2,
         pointRadius: dates.length > 60 ? 0 : 2, // ซ่อนจุดถ้ามีข้อมูลเยอะ
         pointHoverRadius: 5,
         pointBackgroundColor: pointColors,
@@ -357,12 +398,8 @@ function renderLineChart() {
               return dates[idx] || items[0].label;
             },
             label: (item) => {
-              const pct = item.parsed.y;
-              const sign = pct >= 0 ? '+' : '';
               const cur = currency === 'THB' ? '฿' : '$';
-              const estUSD = totalCostUSD * (1 + pct / 100);
-              const dispVal = currency === 'THB' ? estUSD * THB_RATE : estUSD;
-              return `${sign}${pct.toFixed(2)}%  (${cur}${fmt(dispVal)})`;
+              return `${cur}${fmt(item.parsed.y)}`;
             }
           }
         }
@@ -376,7 +413,7 @@ function renderLineChart() {
           grid: { color: 'rgba(255,255,255,0.04)' },
           ticks: {
             color: '#5a6478', font: { size: 10 },
-            callback: v => (v >= 0 ? '+' : '') + fmt(v, 0) + '%'
+            callback: v => (currency === 'THB' ? '฿' : '$') + fmt(v, 0)
           }
         }
       }
@@ -2631,12 +2668,19 @@ function onTxTypeChange() {
   const type = document.getElementById('txType').value;
   const rateWrap = document.getElementById('txRateWrap');
   const amountEl = document.getElementById('txAmount');
+  const hintEl = document.getElementById('txCurrencyHint');
   if (type === 'interest') {
     rateWrap.style.display = 'none';
     amountEl.placeholder = 'จำนวนเงินที่ฝาก/ดอกเบี้ย (THB)';
+    if (hintEl) hintEl.textContent = '';
+  } else if (type === 'interest_usd') {
+    rateWrap.style.display = 'none';
+    amountEl.placeholder = 'จำนวนเงินที่ฝาก/ดอกเบี้ย (USD)';
+    if (hintEl) hintEl.textContent = '💵 บันทึกเป็น USD โดยตรง จะรวมเข้า "USD คงเหลือ" ทันที';
   } else {
     rateWrap.style.display = '';
     amountEl.placeholder = 'จำนวน THB';
+    if (hintEl) hintEl.textContent = '';
   }
 }
 
@@ -2646,12 +2690,16 @@ async function addWalletTx() {
   const date   = document.getElementById('txDate').value || new Date().toISOString().slice(0, 10);
   const note   = document.getElementById('txNote').value.trim();
 
-  if (isNaN(amount) || amount <= 0) { showToast('กรุณากรอกจำนวนเงิน THB', 'var(--red)'); return; }
+  if (isNaN(amount) || amount <= 0) { showToast('กรุณากรอกจำนวนเงิน', 'var(--red)'); return; }
 
   let tx;
   if (type === 'interest') {
-    // เงินฝาก/ดอกเบี้ย: เก็บเป็น THB ล้วนๆ ไม่มีอัตราแลก ไม่กระทบ avg rate หรือ FX P&L ของการแลกเงินเลย
+    // เงินฝาก/ดอกเบี้ย (THB): เก็บเป็น THB ล้วนๆ ไม่มีอัตราแลก ไม่กระทบ avg rate หรือ FX P&L ของการแลกเงินเลย
     tx = { id: 'w' + Date.now(), type: 'interest', amount, rate: 0, usd: 0, date, note: note || 'ฝากเงิน/ดอกเบี้ย' };
+  } else if (type === 'interest_usd') {
+    // เงินฝาก/ดอกเบี้ย (USD): เก็บเป็น USD ตรงๆ ไม่มีอัตราแลก ไม่กระทบ avg rate หรือ FX P&L
+    // แต่จะถูกรวมเข้า "USD คงเหลือ" ทันที (เหมือนได้ USD เพิ่มมาโดยไม่ต้องแลกเงิน)
+    tx = { id: 'w' + Date.now(), type: 'interest_usd', amount: 0, rate: 0, usd: amount, date, note: note || 'ฝากเงิน/ดอกเบี้ย (USD)' };
   } else {
     const rate = parseFloat(document.getElementById('txRate').value);
     if (isNaN(rate) || rate <= 0) { showToast('กรุณากรอกอัตราแลก THB/USD', 'var(--red)'); return; }
@@ -2666,7 +2714,7 @@ async function addWalletTx() {
     localStorage.setItem('wallet_txs', JSON.stringify(_walletTxs));
     showToast('⚠️ บันทึกลง Supabase ไม่สำเร็จ (เก็บไว้ในเครื่องชั่วคราว): ' + (error.message || error.code), 'var(--red)');
   } else {
-    showToast(type === 'interest' ? '🏦 บันทึกเงินฝาก/ดอกเบี้ยแล้ว' : '💱 บันทึกการแลกเงินแล้ว');
+    showToast(type === 'interest' ? '🏦 บันทึกเงินฝาก/ดอกเบี้ย (THB) แล้ว' : type === 'interest_usd' ? '💵 บันทึกเงินฝาก/ดอกเบี้ย (USD) แล้ว' : '💱 บันทึกการแลกเงินแล้ว');
   }
 
   ['txAmount', 'txRate', 'txNote'].forEach(id => document.getElementById(id).value = '');
@@ -2698,8 +2746,11 @@ function renderWalletTab() {
   const avgRate = fxBuyUSD > 0 ? fxBuyTHB / fxBuyUSD : THB_RATE;
   const portfolioCostTHB = portfolioCostUSD * avgRate;
 
-  // USD คงเหลือ = USD แลกมา - ต้นทุน USD ในพอร์ต
-  const usdBalance = fxBuyUSD - portfolioCostUSD;
+  // เงินฝาก/ดอกเบี้ยที่ฝากเป็น USD โดยตรง (ไม่ผ่านอัตราแลก) — บวกเข้า USD คงเหลือทันที
+  const interestUSD = _walletTxs.filter(t => t.type === 'interest_usd').reduce((a, t) => a + (t.usd || 0), 0);
+
+  // USD คงเหลือ = USD แลกมา + USD ฝาก/ดอกเบี้ยตรง - ต้นทุน USD ในพอร์ต
+  const usdBalance = fxBuyUSD + interestUSD - portfolioCostUSD;
 
   // กำไร/ขาดทุนค่าเงิน (FX P&L):
   // มูลค่าพอร์ตปัจจุบัน (THB) = _stocks.reduce price × shares × currentRate
@@ -2752,7 +2803,7 @@ function renderWalletTab() {
     <div class="card">
       <div class="card-label">💵 USD คงเหลือ</div>
       <div class="card-value ${usdBalance >= 0 ? 'green' : 'red'}">${usdBalance >= 0 ? '+' : ''}$${fmt(usdBalance, 2)}</div>
-      <div class="card-sub">แลกมา $${fmt(fxBuyUSD,2)} / ลงทุนไป $${fmt(portfolioCostUSD,2)}</div>
+      <div class="card-sub">แลกมา $${fmt(fxBuyUSD,2)}${interestUSD > 0 ? ' + ฝาก/ดอกเบี้ย $' + fmt(interestUSD,2) : ''} / ลงทุนไป $${fmt(portfolioCostUSD,2)}</div>
     </div>
     <div class="card">
       <div class="card-label">📤 รับจากขายหุ้น</div>
@@ -2763,6 +2814,11 @@ function renderWalletTab() {
       <div class="card-label">🏦 เงินฝาก/ดอกเบี้ย (THB)</div>
       <div class="card-value ${interestTHB > 0 ? 'green' : ''}">${interestTHB > 0 ? '+฿' + fmt(interestTHB) : '—'}</div>
       <div class="card-sub">${_walletTxs.filter(t => t.type === 'interest').length} รายการ · ไม่ผูกกับอัตราแลกเปลี่ยน</div>
+    </div>
+    <div class="card">
+      <div class="card-label">🏦 เงินฝาก/ดอกเบี้ย (USD)</div>
+      <div class="card-value ${interestUSD > 0 ? 'green' : ''}">${interestUSD > 0 ? '+$' + fmt(interestUSD,2) : '—'}</div>
+      <div class="card-sub">${_walletTxs.filter(t => t.type === 'interest_usd').length} รายการ · รวมเข้า USD คงเหลือทันที</div>
     </div>
   `;
 
@@ -2801,25 +2857,31 @@ function renderWalletTab() {
     }
   });
 
-  // Table - แสดง fx_buy, sell_return, deposit (legacy) และ interest (ฝาก/ดอกเบี้ย)
+  // Table - แสดง fx_buy, sell_return, deposit (legacy), interest (ฝาก/ดอกเบี้ย THB) และ interest_usd (ฝาก/ดอกเบี้ย USD)
   const tbody = document.getElementById('walletBody');
   const txSorted = [..._walletTxs]
-    .filter(t => t.type === 'fx_buy' || t.type === 'sell_return' || t.type === 'deposit' || t.type === 'interest')
+    .filter(t => t.type === 'fx_buy' || t.type === 'sell_return' || t.type === 'deposit' || t.type === 'interest' || t.type === 'interest_usd')
     .sort((a, b) => b.date.localeCompare(a.date));
   tbody.innerHTML = txSorted.length === 0
     ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">ยังไม่มีรายการ</td></tr>`
     : txSorted.map(t => {
       const isSell = t.type === 'sell_return';
       const isInterest = t.type === 'interest';
-      const label = isSell ? '📤 ขายหุ้น' : isInterest ? '🏦 ฝาก/ดอกเบี้ย' : '💱 แลกเงิน';
-      const amountCell = isSell || isInterest
-        ? `<td class="mono green">+฿${fmt(t.amount)}</td>`
-        : `<td class="mono tx-exchange">-฿${fmt(t.amount)}</td>`;
+      const isInterestUSD = t.type === 'interest_usd';
+      const label = isSell ? '📤 ขายหุ้น' : isInterest ? '🏦 ฝาก/ดอกเบี้ย (THB)' : isInterestUSD ? '🏦 ฝาก/ดอกเบี้ย (USD)' : '💱 แลกเงิน';
+      const amountCell = isInterestUSD
+        ? `<td class="mono" style="color:var(--muted)">—</td>`
+        : (isSell || isInterest)
+          ? `<td class="mono green">+฿${fmt(t.amount)}</td>`
+          : `<td class="mono tx-exchange">-฿${fmt(t.amount)}</td>`;
+      const usdCell = isInterestUSD
+        ? `<td class="mono green">+$${fmt(t.usd, 2)}</td>`
+        : `<td class="mono green">${t.usd > 0 ? '+$' + fmt(t.usd, 4) : '—'}</td>`;
       return `<tr>
         <td class="mono" style="color:var(--muted)">${t.date}</td>
         ${amountCell}
         <td class="mono" style="color:var(--muted)">${t.rate > 0 ? t.rate.toFixed(4) : '—'}</td>
-        <td class="mono green">${t.usd > 0 ? '+$' + fmt(t.usd, 4) : '—'}</td>
+        ${usdCell}
         <td style="color:var(--muted);font-size:0.8rem">${label}${t.note ? ' · ' + t.note : ''}</td>
         <td><button class="btn-icon del" onclick="deleteWalletTx('${t.id}')">✕</button></td>
       </tr>`;

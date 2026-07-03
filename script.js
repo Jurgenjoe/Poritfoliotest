@@ -1199,9 +1199,10 @@ async function fetchRealPrices() {
     lbl.textContent = `🕐 ${timeStr}`;
     renderTable();
     updateLiveTable();
-    updateLiveSummary();
     updateTape();
-    renderLineChart();
+    // ✦ FIX: ไม่ re-render การ์ดสรุป/hero/กราฟทุกครั้งที่ดึงราคาจริงใหม่ (ทุก 5 นาที) แล้ว —
+    // ผู้ใช้อยากให้ "มูลค่าสินทรัพย์ทั้งหมด" นิ่ง ไม่ขยับระหว่างวัน จะขยับก็ต่อเมื่อจบวัน/รีเฟรชหน้าใหม่
+    // เท่านั้น (ราคาจริงยังถูกบันทึกลง s.price/DB ตามปกติ แค่ไม่เอามาอัปเดตหน้าจอทันที)
     checkPriceAlerts();
   } else {
     lbl.textContent = 'LIVE (sim)';
@@ -1224,10 +1225,8 @@ async function autoFetch() {
   setInterval(fetchRealPrices, 5 * 60 * 1000);
   setInterval(async () => {
     await fetchExchangeRate();
-    // Re-render summary to reflect new rate
-    renderSummary();
-    renderLineChart();
-    updateLiveSummary();
+    // ✦ FIX: ไม่ re-render มูลค่ารวม/hero/กราฟตามรอบนี้แล้ว (ให้นิ่งจนกว่าจะจบวัน/รีเฟรชหน้าใหม่)
+    // อัตราแลกเปลี่ยนใหม่จะมีผลตอนคำนวณรอบถัดไปที่ผู้ใช้รีเฟรชหน้าเองแทน
   }, 15 * 60 * 1000);
 }
 
@@ -1281,28 +1280,13 @@ function tickPrices() {
     if (lp.history.length > 60) lp.history.shift();
   });
   updateLiveTable();
-  // NOTE: summary cards (total portfolio value) intentionally use renderSummary()'s
-  // real-price calculation, not this cosmetic tick — see updateLiveSummary() below.
-  updateLiveSummary();
+  // ✦ FIX: มูลค่าสินทรัพย์ทั้งหมด (การ์ดสรุปด้านบน + hero) ไม่ควรขยับทุกวินาทีตาม tick
+  // จำลองราคาแบบนี้ — ผู้ใช้ต้องการให้ตัวเลขนิ่ง แล้วค่อยขยับจริงตอนจบวัน (ปิดตลาด/อัปเดตราคาจริง)
+  // เท่านั้น ตัดการเรียก updateLiveSummary() และการแปะทับจุดสุดท้ายของกราฟเส้นออกจาก tick นี้
+  // (เดิมเป็นสาเหตุที่ตัวเลข/กราฟกระตุกแม้ราคาจริงไม่ได้เปลี่ยน) ตารางหุ้นรายตัวยังไหวเป็น
+  // cosmetic effect ได้ตามปกติ (updateLiveTable ด้านบน) แต่ยอดรวมจะนิ่งจนกว่าจะมีราคาจริงใหม่
+  // เข้ามาจาก fetchRealPrices()/updateTodayPctRecord() ตอนจบวัน
   updateTape();
-  // line chart's live-updating last point also anchors to REAL price, not the jittered one
-  // ✦ FIX: เดิมเอา "มูลค่าพอร์ตเป็นตัวเงินจริง" (เช่น $20,597) มาแปะทับจุดสุดท้ายตรงๆ
-  // แต่กราฟตอนนี้เปลี่ยนเป็นดัชนีเริ่มที่ $100 แล้ว (ดู renderLineChart) การเอาค่าเงินจริงมาแปะ
-  // จะทำให้จุดสุดท้ายกระโดดไปสเกลเงินจริง (Y แกนเด้งเป็น $0-25,000 เส้นที่เหลือแบนติดพื้น)
-  // ต้องแปลงเป็น multiplier เทียบต้นทุนก่อน แล้วคูณด้วย $100 เหมือนตอน render ให้สเกลตรงกัน
-  if (lineChartInst) {
-    let total = 0, totalCostUSD = 0;
-    stocks.forEach(s => {
-      total += parseFloat(s.price) * parseFloat(s.shares);
-      totalCostUSD += parseFloat(s.cost) * parseFloat(s.shares);
-    });
-    const m = totalCostUSD > 0 ? (total / totalCostUSD) : 1;
-    const idxVal = 100 * m; // เดียวกับ INDEX_BASE ใน renderLineChart
-    const val = currency==='THB' ? idxVal*THB_RATE : idxVal;
-    const data = lineChartInst.data.datasets[0].data;
-    data[data.length-1] = parseFloat(val.toFixed(2));
-    lineChartInst.update('none');
-  }
   checkPriceAlerts();
   // live-update detail view chart if open
   if (detailState.open) updateDetailLivePrice();

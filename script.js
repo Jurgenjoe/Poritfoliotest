@@ -688,7 +688,14 @@ function renderWeeklyChange() {
     if (isFuture) return `<td class="wc-day-cell wc-future"><div class="wc-day-value flat">–</div>${dateLabel}</td>`;
 
     const rec = _dailyPct.find(r => r.date === dateKey);
-    if (!rec) return `<td class="wc-day-cell wc-empty"><div class="wc-day-value flat">–</div>${dateLabel}</td>`;
+    if (!rec) {
+      // แยกให้ชัดว่า "ไม่มีข้อมูล" เพราะวันหยุดตลาด (ไม่มีการเทรดจริง ๆ) กับ "ไม่มีข้อมูล" เพราะ
+      // ระบบยังบันทึกไม่ทัน/พัง — ทั้งสองแบบไม่นับใน % รวมของสัปดาห์เหมือนกัน แต่ label ต่างกันเพื่อไม่ให้สับสน
+      if (isNyseHoliday(dateKey)) {
+        return `<td class="wc-day-cell wc-empty wc-holiday" title="ตลาดหุ้นสหรัฐฯ ปิดทำการวันนี้ (วันหยุด) — ไม่มีการเทรด จึงไม่นับ % วันนี้"><div class="wc-day-value flat">ปิด</div>${dateLabel}</td>`;
+      }
+      return `<td class="wc-day-cell wc-empty" title="ยังไม่มีข้อมูล % ของวันนี้"><div class="wc-day-value flat">–</div>${dateLabel}</td>`;
+    }
 
     const pct = rec.pct;
     const cls = pct > 0 ? 'up' : pct < 0 ? 'down' : 'flat';

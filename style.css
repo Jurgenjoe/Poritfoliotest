@@ -77,6 +77,9 @@
     font-weight: 700;
     color: var(--text);
     line-height: 1.2;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   .card-sub {
     font-size: 0.72rem;
@@ -190,7 +193,9 @@
     background: var(--surface);
     border: 1px solid var(--border);
     border-radius: 14px;
-    overflow: hidden;
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
     margin-bottom: 28px;
   }
   table { width: 100%; border-collapse: collapse; }
@@ -865,7 +870,7 @@
 .portfolio-hero { padding: 18px 18px 14px; }
 .hero-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
 .hero-label { font-size: 0.78rem; color: var(--muted); }
-.hero-value { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 700; color: var(--text); line-height: 1.2; }
+.hero-value { font-family: var(--font-mono); font-size: 1.6rem; font-weight: 700; color: var(--text); line-height: 1.2; white-space: nowrap; }
 .hero-value-unit { font-size: 0.85rem; color: var(--muted); font-weight: 600; }
 .hero-thb { font-size: 0.85rem; color: var(--muted); margin-top: 2px; }
 .hero-gain { font-size: 0.8rem; color: var(--muted); margin-top: 8px; }
@@ -948,6 +953,7 @@
 .wc-day-cell:hover { border-color: var(--muted2); }
 .wc-day-cell.wc-future { opacity: .35; }
 .wc-day-cell.wc-empty { color: var(--muted2); }
+.wc-day-cell.wc-holiday .wc-day-value { font-size: .78rem; font-style: italic; }
 .wc-day-value {
   font-family: var(--font-mono);
   font-weight: 700;

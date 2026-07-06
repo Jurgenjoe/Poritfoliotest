@@ -79,7 +79,7 @@
     line-height: 1.2;
     white-space: nowrap;
     overflow: hidden;
-    text-overflow: ellipsis;
+    text-overflow: clip; /* ไม่ตัดด้วย ... แล้ว — ตัวเลขจะถูกย่อขนาดฟอนต์แทนด้วย JS ด้านล่าง */
   }
   .card-sub {
     font-size: 0.72rem;

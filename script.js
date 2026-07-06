@@ -4518,3 +4518,48 @@ async function fetchVixFearGreed() {
   changeEl.textContent = (change >= 0 ? '+' : '') + change.toFixed(2);
   changeEl.style.color = change >= 0 ? 'var(--red)' : 'var(--green, #2ecc71)'; // VIX ขึ้น = ตลาดกลัวมากขึ้น เลยใช้สีแดง
 }
+
+// ===== AUTO-FIT CARD VALUE TEXT =====
+// แทนที่จะตัดตัวเลขด้วย "..." เมื่อล้นกล่อง (card-value) ให้ลดขนาดฟอนต์ลงอัตโนมัติ
+// จนพอดีกับพื้นที่ที่มี แล้วค่อยแสดงตัวเลขแบบเต็มๆ
+(function () {
+  function fitOne(el) {
+    if (!el || !el.isConnected) return;
+    // เก็บขนาดฟอนต์ตั้งต้น (จาก CSS หรือ inline style) ไว้ครั้งแรกที่เจอ element นี้
+    if (!el.dataset.baseFontPx) {
+      const cs = window.getComputedStyle(el);
+      el.dataset.baseFontPx = parseFloat(cs.fontSize);
+    }
+    const base = parseFloat(el.dataset.baseFontPx);
+    const min = Math.max(base * 0.45, 10); // ไม่ให้เล็กเกินไปจนอ่านไม่ออก
+    let size = base;
+    el.style.fontSize = size + 'px';
+    let guard = 0;
+    while (el.scrollWidth > el.clientWidth + 0.5 && size > min && guard < 60) {
+      size -= 0.5;
+      el.style.fontSize = size + 'px';
+      guard++;
+    }
+  }
+
+  function fitAllCardValues() {
+    document.querySelectorAll('.card-value').forEach(fitOne);
+  }
+
+  let rafId = null;
+  function scheduleFit() {
+    if (rafId) cancelAnimationFrame(rafId);
+    rafId = requestAnimationFrame(() => {
+      rafId = null;
+      fitAllCardValues();
+    });
+  }
+
+  const mo = new MutationObserver(scheduleFit);
+  document.addEventListener('DOMContentLoaded', () => {
+    mo.observe(document.body, { childList: true, subtree: true, characterData: true });
+    scheduleFit();
+  });
+  window.addEventListener('resize', scheduleFit);
+  window.__fitAllCardValues = fitAllCardValues;
+})();

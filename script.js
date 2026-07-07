@@ -1102,6 +1102,11 @@ async function fetchExchangeRate() {
   return false;
 }
 
+// ---- TWELVE DATA (แหล่งกราฟย้อนหลังหลัก — official API, มี CORS รองรับตรง ไม่ต้องพึ่ง proxy) ----
+// สมัครฟรีได้ที่ https://twelvedata.com/pricing แล้วเอา API key มาใส่ตรงนี้
+const TWELVE_DATA_KEY = '9197b19f8cf6436abf0769f025a61ffe';
+let twelveDataKeyOk = null; // null = unknown/untested, true = working, false = confirmed invalid/quota หมด
+
 // ---- FINNHUB REAL PRICE FETCH ----
 const FINNHUB_KEY = 'd8h7m9pr01qhjpmqv5tgd8h7m9pr01qhjpmqv5u0';
 let lastFetchTime = null;
@@ -1686,6 +1691,86 @@ function closeDetail() {
   document.body.style.overflow = '';
 }
 
+// ---- Real historical candles from Twelve Data (official API, ไม่ต้องพึ่ง CORS proxy) ----
+function tfToTwelveData(tf) {
+  return {
+    '1D': { interval: '15min', outputsize: 32  },
+    '1M': { interval: '1day',  outputsize: 30  },
+    '3M': { interval: '1day',  outputsize: 90  },
+    '6M': { interval: '1day',  outputsize: 180 },
+    '1Y': { interval: '1week', outputsize: 52  },
+    '5Y': { interval: '1month',outputsize: 60  },
+  }[tf] || { interval: '1day', outputsize: 30 };
+}
+
+async function fetchTwelveDataCandles(ticker, tf) {
+  if (!TWELVE_DATA_KEY || TWELVE_DATA_KEY.includes('ใส่_API_KEY')) {
+    throw new Error('TWELVE_DATA_NO_KEY'); // ยังไม่ได้ตั้งค่า key — ข้ามไปแหล่งถัดไปเงียบๆ
+  }
+  if (twelveDataKeyOk === false) throw new Error('TWELVE_DATA_AUTH_FAILED');
+  const { interval, outputsize } = tfToTwelveData(tf);
+  const url = `https://api.twelvedata.com/time_series?symbol=${encodeURIComponent(ticker)}&interval=${interval}&outputsize=${outputsize}&apikey=${TWELVE_DATA_KEY}`;
+  const res = await fetchWithTimeout(url, 8000);
+  if (!res.ok) throw new Error('HTTP ' + res.status);
+  const data = await res.json();
+  if (data.status === 'error' || !Array.isArray(data.values) || !data.values.length) {
+    // code 401/403 = key ผิด, 429 = เกินโควต้าฟรี (800 req/วัน)
+    if (data.code === 401 || data.code === 403) twelveDataKeyOk = false;
+    throw new Error(data.message || 'No data from Twelve Data');
+  }
+  twelveDataKeyOk = true;
+  // Twelve Data ส่งข้อมูลใหม่สุดมาก่อน (descending) — ต้อง reverse ให้เรียงเก่า→ใหม่
+  const candles = data.values.slice().reverse().map(v => ({
+    t: new Date(v.datetime.length > 10 ? v.datetime : v.datetime + 'T00:00:00').getTime(),
+    o: parseFloat(v.open), h: parseFloat(v.high), l: parseFloat(v.low), c: parseFloat(v.close),
+    v: v.volume ? parseInt(v.volume) : 0
+  })).filter(c => !isNaN(c.o) && !isNaN(c.h) && !isNaN(c.l) && !isNaN(c.c));
+  if (!candles.length) throw new Error('Empty candles from Twelve Data');
+  return candles;
+}
+
+// ---- Real historical candles from Yahoo Finance (no key needed, ใช้ CORS proxy เดียวกับ VIX/ราคาทอง) ----
+// ใช้เป็นแหล่งสำรองเมื่อ Finnhub ใช้ไม่ได้ (free tier ของ Finnhub มักบล็อก /stock/candle)
+function tfToYahoo(tf) {
+  return {
+    '1D': { range: '1d',  interval: '5m'  },
+    '1M': { range: '1mo', interval: '1d'  },
+    '3M': { range: '3mo', interval: '1d'  },
+    '6M': { range: '6mo', interval: '1d'  },
+    '1Y': { range: '1y',  interval: '1wk' },
+    '5Y': { range: '5y',  interval: '1mo' },
+  }[tf] || { range: '1mo', interval: '1d' };
+}
+
+async function fetchYahooCandles(ticker, tf) {
+  const { range, interval } = tfToYahoo(tf);
+  const YAHOO_URL = `https://query1.finance.yahoo.com/v8/finance/chart/${encodeURIComponent(ticker)}?range=${range}&interval=${interval}`;
+  const attempts = [
+    { url: YAHOO_URL, label: 'Yahoo Finance' },
+    { url: 'https://api.codetabs.com/v1/proxy?quest=' + encodeURIComponent(YAHOO_URL), label: 'Yahoo Finance (ผ่าน CORS proxy)' },
+    { url: 'https://api.allorigins.win/raw?url=' + encodeURIComponent(YAHOO_URL), label: 'Yahoo Finance (ผ่าน CORS proxy สำรอง)' },
+  ];
+  let lastErr = new Error('Yahoo fetch failed');
+  for (const a of attempts) {
+    try {
+      const r = await fetchWithTimeout(a.url, 8000);
+      if (!r.ok) { lastErr = new Error('HTTP ' + r.status); continue; }
+      const d = await r.json();
+      const result = d?.chart?.result?.[0];
+      if (!result || !result.timestamp || !result.timestamp.length) { lastErr = new Error('No data'); continue; }
+      const ts = result.timestamp;
+      const q = result.indicators?.quote?.[0] || {};
+      const candles = ts.map((t, i) => ({
+        t: t * 1000,
+        o: q.open?.[i], h: q.high?.[i], l: q.low?.[i], c: q.close?.[i], v: q.volume?.[i] || 0
+      })).filter(c => c.o != null && c.h != null && c.l != null && c.c != null);
+      if (!candles.length) { lastErr = new Error('Empty candles'); continue; }
+      return candles;
+    } catch (e) { lastErr = e; }
+  }
+  throw lastErr;
+}
+
 // ---- Real historical candles from Finnhub, with graceful fallback to mock series ----
 async function fetchFinnhubCandles(ticker, tf) {
   if (finnhubKeyOk === false) throw new Error('FINNHUB_AUTH_FAILED');
@@ -1717,30 +1802,40 @@ async function loadCandlesForTicker(ticker, tf) {
   const base = livePrices[ticker]?.price || parseFloat(s?.price || 100);
 
   setChartDataSourceLabel('⏳ กำลังดึงราคาจริง...', '#0099ff');
-  try {
-    const real = await fetchFinnhubCandles(ticker, tf);
-    // keep last candle's close in sync with current live price for a smooth "live tail"
-    if (real.length) {
-      real[real.length-1].c = base;
-      real[real.length-1].h = Math.max(real[real.length-1].h, base);
-      real[real.length-1].l = Math.min(real[real.length-1].l, base);
+
+  // เรียงลำดับแหล่งข้อมูลจากน่าเชื่อถือสุด -> สำรอง -> จำลอง (สุดท้ายจริงๆ)
+  const sources = [
+    { fn: fetchTwelveDataCandles, label: 'Twelve Data' },
+    { fn: fetchYahooCandles,      label: 'Yahoo Finance' },
+    { fn: fetchFinnhubCandles,    label: 'Finnhub' },
+  ];
+
+  let done = false;
+  for (const src of sources) {
+    try {
+      const real = await src.fn(ticker, tf);
+      if (real.length) {
+        // keep last candle's close in sync with current live price for a smooth "live tail"
+        real[real.length - 1].c = base;
+        real[real.length - 1].h = Math.max(real[real.length - 1].h, base);
+        real[real.length - 1].l = Math.min(real[real.length - 1].l, base);
+      }
+      detailState.candles = real;
+      detailState.dataSource = 'real';
+      setChartDataSourceLabel(`✅ ราคาจริงจาก ${src.label}`, 'var(--green)');
+      done = true;
+      break;
+    } catch (err) {
+      console.warn(`[${src.label}] candle fetch failed, trying next source:`, err.message);
     }
-    detailState.candles = real;
-    detailState.dataSource = 'real';
-    setChartDataSourceLabel('✅ ราคาจริงจาก Finnhub', 'var(--green)');
-  } catch (err) {
-    if (err.message === 'FINNHUB_AUTH_FAILED') {
-      console.warn('[Finnhub] Key invalid — using simulated chart (no further candle requests this session).');
-    } else {
-      console.warn('Finnhub candle fetch failed, falling back to simulated chart:', err.message);
-    }
+  }
+
+  if (!done) {
     detailState.candles = genCandles(base, tf, ticker);
     detailState.dataSource = 'mock';
-    setChartDataSourceLabel(
-      err.message === 'FINNHUB_AUTH_FAILED' ? '⚠️ Finnhub key ใช้ไม่ได้ — กราฟจำลอง' : '⚠️ ใช้กราฟจำลอง (ดึงราคาจริงไม่สำเร็จ)',
-      'var(--red)'
-    );
+    setChartDataSourceLabel('⚠️ ใช้กราฟจำลอง (ดึงราคาจริงไม่สำเร็จทุกแหล่ง)', 'var(--red)');
   }
+
   fitView();
   drawChart();
   initDateRangeUI();

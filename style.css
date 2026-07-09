@@ -476,6 +476,55 @@
     .controls { gap: 8px; }
   }
 
+  /* ===== SAFE AREA / PWA STANDALONE ===== */
+  .header {
+    padding-top: calc(18px + env(safe-area-inset-top));
+    padding-left: calc(28px + env(safe-area-inset-left));
+    padding-right: calc(28px + env(safe-area-inset-right));
+  }
+  .tab-nav {
+    padding-left: calc(20px + env(safe-area-inset-left));
+    padding-right: calc(20px + env(safe-area-inset-right));
+  }
+  body { padding-bottom: env(safe-area-inset-bottom); }
+
+  /* ===== MOBILE HEADER LAYOUT ===== */
+  @media (max-width: 720px) {
+    .header {
+      flex-wrap: wrap;
+      row-gap: 10px;
+      padding-top: calc(14px + env(safe-area-inset-top));
+      padding-bottom: 12px;
+      padding-left: calc(16px + env(safe-area-inset-left));
+      padding-right: calc(16px + env(safe-area-inset-right));
+    }
+    .logo { font-size: 0.85rem; }
+    .header-right {
+      width: 100%;
+      flex-wrap: wrap;
+      gap: 6px;
+      justify-content: flex-start;
+    }
+    .live-controls { gap: 6px; font-size: 0.68rem; order: 3; width: 100%; }
+    .live-controls .speed-btn:not(#spd1):not(#spdP) { display: none; }
+    select.dropdown#currencySelect { order: 1; padding: 5px 8px; font-size: 0.7rem; }
+    .btn { padding: 6px 9px; font-size: 0.68rem; order: 1; }
+    .btn-label { display: none; }
+  }
+
+  /* ===== TAB NAV SCROLL HINT ===== */
+  .tab-nav-wrap { position: relative; }
+  .tab-nav-wrap::after {
+    content: "";
+    position: absolute; top: 0; right: 0; bottom: 0; width: 28px;
+    background: linear-gradient(to right, transparent, var(--bg));
+    pointer-events: none;
+  }
+  @media (max-width: 720px) {
+    .tab-nav { padding-top: 8px; }
+    .tab-btn { padding: 7px 12px; font-size: 0.76rem; }
+  }
+
   /* LOGIN SCREEN */
   .login-overlay {
     position: fixed; inset: 0;

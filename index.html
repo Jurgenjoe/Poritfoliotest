@@ -67,11 +67,11 @@
       <option value="USD">USD</option>
       <option value="THB">THB</option>
     </select>
-    <button class="btn btn-outline" id="refreshBtn" onclick="fetchRealPrices()" title="ดึงราคาจริงจาก Yahoo Finance">🔄 Refresh</button>
-    <button class="btn btn-outline" onclick="backupAllData()" title="ดาวน์โหลดข้อมูลทั้งหมดเป็นไฟล์สำรอง">💾 Backup</button>
-    <button class="btn btn-outline" onclick="document.getElementById('restoreFileInput').click()" title="กู้คืนข้อมูลจากไฟล์สำรอง">📥 Restore</button>
+    <button class="btn btn-outline" id="refreshBtn" onclick="fetchRealPrices()" title="ดึงราคาจริงจาก Yahoo Finance">🔄<span class="btn-label"> Refresh</span></button>
+    <button class="btn btn-outline" onclick="backupAllData()" title="ดาวน์โหลดข้อมูลทั้งหมดเป็นไฟล์สำรอง">💾<span class="btn-label"> Backup</span></button>
+    <button class="btn btn-outline" onclick="document.getElementById('restoreFileInput').click()" title="กู้คืนข้อมูลจากไฟล์สำรอง">📥<span class="btn-label"> Restore</span></button>
     <input type="file" id="restoreFileInput" accept="application/json" style="display:none" onchange="restoreAllData(event)">
-    <button class="btn btn-primary" onclick="openModal()">+ เพิ่มหุ้น</button>
+    <button class="btn btn-primary" onclick="openModal()"><span class="btn-plus">+</span><span class="btn-label"> เพิ่มหุ้น</span></button>
   </div>
 </div>
 <div class="ticker-tape">
@@ -79,6 +79,7 @@
 </div>
 
 <!-- TAB NAV -->
+<div class="tab-nav-wrap">
 <div class="tab-nav" id="tabNav">
   <button class="tab-btn active" onclick="switchTab('portfolio')">📊 พอร์ต</button>
   <button class="tab-btn" onclick="switchTab('summary')">📈 สรุปภาพรวม</button>
@@ -88,6 +89,7 @@
   <button class="tab-btn" onclick="switchTab('gold')">🥇 ออมทอง</button>
   <button class="tab-btn" onclick="switchTab('news')">📰 ข่าว</button>
   <button class="tab-btn" onclick="switchTab('feargreed')">😨 Fear &amp; Greed</button>
+</div>
 </div>
 
 <!-- ===== TAB: PORTFOLIO (existing) ===== -->

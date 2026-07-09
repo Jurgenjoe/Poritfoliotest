@@ -3166,7 +3166,7 @@ async function renderAssetsTab() {
       responsive: true,
       maintainAspectRatio: true,
       plugins: {
-        legend: { position: 'right', labels: { color: '#e8edf5', font: { size: 11 }, boxWidth: 14, padding: 10 } },
+        legend: { position: 'right', labels: { color: '#e8edf5', font: { size: 13 }, boxWidth: 16, padding: 14 } },
         tooltip: { callbacks: { label: c => { const total = c.dataset.data.reduce((a, b) => a + b, 0); return ` ${c.label}: ฿${fmt(c.parsed)} (${((c.parsed / total) * 100).toFixed(1)}%)`; } } }
       },
       layout: { padding: 10 }

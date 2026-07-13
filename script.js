@@ -3330,7 +3330,7 @@ function parseAllDimeRows(text) {
   const rows = [];
 
   // Pattern: orderId  date  BUY|SEL  TICKER  [EXCH]  shares  unitPrice  USD  grossUSD  fee  wht  totalUSD  grossTHB  fee_thb  wht_thb  totalTHB
-  const rowRe = /(\d{6,})\s+(\d{2}\/\d{2}\/\d{4})\s+(BUY|SEL(?:L)?)\s+([A-Z]{1,5})\s+\[[A-Z]+\]\s+([\d.]+)\s+([\d.]+)\s+USD\s+([\d,]+\.?\d*)\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+([\d,]+\.?\d*)/g;
+  const rowRe = /(\d{6,})\s+(\d{2}\/\d{2}\/\d{4})\s+(BUY|SEL(?:L)?)\s+([A-Z]{1,5})\s+\[[A-Z]+\]\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+USD\s+([\d,]+\.?\d*)\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+([\d,]+\.?\d*)\s+([\d,]+\.?\d*)\s+[\d,]+\.?\d*\s+[\d,]+\.?\d*\s+([\d,]+\.?\d*)/g;
 
   let m;
   while ((m = rowRe.exec(t)) !== null) {
@@ -3338,8 +3338,8 @@ function parseAllDimeRows(text) {
     const rowDate   = m[2];
     const txType    = m[3] === 'SEL' ? 'SELL' : m[3];
     const ticker    = m[4];
-    const shares    = parseFloat(m[5]);
-    const unitPrice = parseFloat(m[6]);
+    const shares    = parseFloat(m[5].replace(/,/g, ''));
+    const unitPrice = parseFloat(m[6].replace(/,/g, ''));
     const grossUSD  = parseFloat(m[7].replace(/,/g, ''));
     const totalUSD  = parseFloat(m[8].replace(/,/g, ''));
     const grossTHB  = parseFloat(m[10].replace(/,/g, ''));

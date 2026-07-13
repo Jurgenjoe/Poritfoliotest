@@ -3405,11 +3405,13 @@ async function processSingleImportRow(p) {
       const remainingShares = parseFloat(_stocks[existing].shares) - p.shares;
       if (remainingShares <= 0) {
         const removed = _stocks.splice(existing, 1)[0];
-        try { await sb.from('stocks').delete().eq('id', removed.id); } catch (e) { }
+        try { await sb.from('stocks').delete().eq('ticker', removed.ticker); } catch (e) { }
       } else {
         _stocks[existing].shares = parseFloat(remainingShares.toFixed(4));
         await saveStockToSB(_stocks[existing]);
       }
+    } else {
+      showToast(`⚠️ ขาย ${p.ticker} แต่ในพอร์ตไม่มีหุ้นนี้อยู่ — ข้ามการปรับหุ้น (เช็คว่า import ครบหรือยัง)`, 'var(--yellow)');
     }
   }
 
@@ -3745,11 +3747,13 @@ async function confirmImageImport() {
           const remainingShares = parseFloat(_stocks[existing].shares) - shares;
           if (remainingShares <= 0) {
             const removed = _stocks.splice(existing, 1)[0];
-            try { await sb.from('stocks').delete().eq('id', removed.id); } catch (e) { }
+            try { await sb.from('stocks').delete().eq('ticker', removed.ticker); } catch (e) { }
           } else {
             _stocks[existing].shares = parseFloat(remainingShares.toFixed(4));
             await saveStockToSB(_stocks[existing]);
           }
+        } else {
+          showToast(`⚠️ ขาย ${p.ticker} แต่ในพอร์ตไม่มีหุ้นนี้อยู่ — ข้ามการปรับหุ้น`, 'var(--yellow)');
         }
       }
 

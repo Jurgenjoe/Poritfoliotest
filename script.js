@@ -2999,10 +2999,10 @@ function renderWalletTab() {
     }
   });
 
-  // Table - แสดง fx_buy, sell_return, deposit (legacy), interest (ฝาก/ดอกเบี้ย THB) และ interest_usd (ฝาก/ดอกเบี้ย USD)
+  // Table - แสดง fx_buy, sell_return, deposit (legacy), interest (ฝาก/ดอกเบี้ย THB), interest_usd (ฝาก/ดอกเบี้ย USD) และ stock_buy_usd (ซื้อหุ้นด้วย USD คงเหลือ)
   const tbody = document.getElementById('walletBody');
   const txSorted = [..._walletTxs]
-    .filter(t => t.type === 'fx_buy' || t.type === 'sell_return' || t.type === 'deposit' || t.type === 'interest' || t.type === 'interest_usd')
+    .filter(t => t.type === 'fx_buy' || t.type === 'sell_return' || t.type === 'deposit' || t.type === 'interest' || t.type === 'interest_usd' || t.type === 'stock_buy_usd')
     .sort((a, b) => b.date.localeCompare(a.date));
   tbody.innerHTML = txSorted.length === 0
     ? `<tr><td colspan="6" style="text-align:center;color:var(--muted);padding:24px">ยังไม่มีรายการ</td></tr>`
@@ -3010,15 +3010,18 @@ function renderWalletTab() {
       const isSell = t.type === 'sell_return';
       const isInterest = t.type === 'interest';
       const isInterestUSD = t.type === 'interest_usd';
-      const label = isSell ? '📤 ขายหุ้น' : isInterest ? '🏦 ฝาก/ดอกเบี้ย (THB)' : isInterestUSD ? '🏦 ฝาก/ดอกเบี้ย (USD)' : '💱 แลกเงิน';
-      const amountCell = isInterestUSD
+      const isStockBuyUSD = t.type === 'stock_buy_usd';
+      const label = isSell ? '📤 ขายหุ้น' : isInterest ? '🏦 ฝาก/ดอกเบี้ย (THB)' : isInterestUSD ? '🏦 ฝาก/ดอกเบี้ย (USD)' : isStockBuyUSD ? '📥 ซื้อหุ้น (ใช้ USD คงเหลือ)' : '💱 แลกเงิน';
+      const amountCell = (isInterestUSD || isStockBuyUSD)
         ? `<td class="mono" style="color:var(--muted)">—</td>`
         : (isSell || isInterest)
           ? `<td class="mono green">+฿${fmt(t.amount)}</td>`
           : `<td class="mono tx-exchange">-฿${fmt(t.amount)}</td>`;
-      const usdCell = isInterestUSD
-        ? `<td class="mono green">+$${fmt(t.usd, 2)}</td>`
-        : `<td class="mono green">${t.usd > 0 ? '+$' + fmt(t.usd, 4) : '—'}</td>`;
+      const usdCell = isStockBuyUSD
+        ? `<td class="mono" style="color:var(--red)">-$${fmt(t.usd, 4)}</td>`
+        : isInterestUSD
+          ? `<td class="mono green">+$${fmt(t.usd, 2)}</td>`
+          : `<td class="mono green">${t.usd > 0 ? '+$' + fmt(t.usd, 4) : '—'}</td>`;
       return `<tr>
         <td class="mono" style="color:var(--muted)">${t.date}</td>
         ${amountCell}
@@ -3414,7 +3417,7 @@ async function processSingleImportRow(p) {
   if (p.grossTHB > 0) {
     const tx = {
       id: 'w' + Date.now() + Math.random().toString(36).slice(2, 6),
-      type: p.txType === 'SELL' ? 'sell_return' : 'exchange',
+      type: p.txType === 'SELL' ? 'sell_return' : 'stock_buy_usd',
       amount: p.grossTHB, rate: p.fxRate, usd: p.grossUSD, date: dateStr,
       note: `${p.txType === 'SELL' ? 'ขาย' : 'ซื้อ'} ${p.ticker} ${fmt(p.shares, 4)} หุ้น (PDF Import)`
     };
@@ -3444,10 +3447,24 @@ async function confirmImport() {
 
   // หา checkbox ที่ติ๊ก
   const checkedIdxs = [...document.querySelectorAll('.import-row-cb:checked')].map(cb => parseInt(cb.dataset.idx));
-  const toImport = allRows.filter((_, i) => checkedIdxs.includes(i));
+  let toImport = allRows.filter((_, i) => checkedIdxs.includes(i));
 
   if (toImport.length === 0) {
     showToast('⚠️ กรุณาเลือกอย่างน้อย 1 รายการ', 'var(--yellow)');
+    return;
+  }
+
+  // กันนำเข้า order ID ซ้ำ (เคย import ไปแล้วก่อนหน้า)
+  await loadImportHistoryFromSB();
+  const importedOrderIds = new Set(_importHistory.map(h => h.order_id).filter(Boolean));
+  const dupRows = toImport.filter(p => p.orderId && importedOrderIds.has(p.orderId));
+  toImport = toImport.filter(p => !(p.orderId && importedOrderIds.has(p.orderId)));
+
+  if (dupRows.length > 0) {
+    showToast(`⚠️ ข้าม ${dupRows.length} รายการที่เคยนำเข้าไปแล้ว (Order ID ซ้ำ)`, 'var(--yellow)');
+  }
+  if (toImport.length === 0) {
+    document.getElementById('importStatus').innerHTML = `<span style="color:var(--yellow)">⚠️ ทุกรายการที่เลือกเคยนำเข้าไปแล้ว ไม่มีรายการใหม่ให้นำเข้า</span>`;
     return;
   }
 
@@ -3755,7 +3772,7 @@ async function confirmImageImport() {
         : (p.note || 'แลกเงิน/โอนเงิน (AI Image Import)');
       const tx = {
         id: 'w' + Date.now(),
-        type: isSell ? 'sell_return' : 'exchange',
+        type: isSell ? 'sell_return' : 'stock_buy_usd',
         amount: p.grossTHB, rate: p.fxRate || THB_RATE,
         usd: p.grossUSD || (p.fxRate ? p.grossTHB / p.fxRate : null), date: dateStr, note
       };

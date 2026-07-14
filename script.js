@@ -2680,6 +2680,7 @@ function switchTab(name) {
   if (name === 'assets') renderAssetsTab();
   if (name === 'import') renderImportHistory();
   if (name === 'gold') initGoldTab();
+  if (name === 'bitcoin') initBtcTab();
   if (name === 'news') initNewsTab();
   if (name === 'feargreed') fetchVixFearGreed();
 }
@@ -3086,6 +3087,7 @@ async function renderAssetsTab() {
   // ต้องมีราคาทองปัจจุบันก่อนถึงจะคำนวณมูลค่าออมทองได้ — ถ้ายังไม่เคยดึง (เช่น เข้าแท็บนี้
   // เป็นแท็บแรกโดยไม่ได้เปิดแท็บ "ออมทอง" มาก่อน) ให้ดึงราคาก่อน แล้วค่อย render การ์ด
   if (GOLD_PRICE_THB <= 0) await fetchGoldPrice();
+  if (BTC_PRICE_THB <= 0) await fetchBtcPrice();
 
   const totalAssets = _assets.reduce((a, x) => a + x.value, 0);
   const totalCostAssets = _assets.reduce((a, x) => a + (x.cost || 0), 0);
@@ -3097,7 +3099,13 @@ async function renderAssetsTab() {
   const goldValueTHB = GOLD_PRICE_THB * goldWeightTotal;
   const goldPL = goldValueTHB - goldCostTotal;
 
-  const netWorth = totalAssets + stocksValueTHB + goldValueTHB;
+  // มูลค่าปัจจุบันของ BTC (จากแท็บ "บิตคอยน์")
+  const btcQtyTotal = _btcEntries.reduce((a, e) => a + e.qty, 0);
+  const btcCostTotal = _btcEntries.reduce((a, e) => a + e.buy_price * e.qty, 0);
+  const btcValueTHB = BTC_PRICE_THB * btcQtyTotal;
+  const btcPL = btcValueTHB - btcCostTotal;
+
+  const netWorth = totalAssets + stocksValueTHB + goldValueTHB + btcValueTHB;
 
   const typeLabels = { crypto: 'Crypto', property: 'อสังหา', gold: 'ทอง', cash: 'เงินสด', fund: 'กองทุน', other: 'อื่น ๆ' };
 
@@ -3105,7 +3113,7 @@ async function renderAssetsTab() {
     <div class="card">
       <div class="card-label">Net Worth รวม (THB)</div>
       <div class="card-value" style="color:var(--gold)">฿${fmt(netWorth)}</div>
-      <div class="card-sub">หุ้น + สินทรัพย์อื่น + ออมทอง</div>
+      <div class="card-sub">หุ้น + สินทรัพย์อื่น + ออมทอง + BTC</div>
     </div>
     <div class="card">
       <div class="card-label">สินทรัพย์อื่น (THB)</div>
@@ -3123,6 +3131,11 @@ async function renderAssetsTab() {
       <div class="card-sub">${fmt(goldWeightTotal, 4)} บาท @ ฿${fmt(GOLD_PRICE_THB, 0)}/บาท</div>
     </div>
     <div class="card">
+      <div class="card-label">₿ บิตคอยน์ (มูลค่าปัจจุบัน)</div>
+      <div class="card-value">฿${fmt(btcValueTHB)}</div>
+      <div class="card-sub">${fmt(btcQtyTotal, 8)} BTC @ ฿${fmt(BTC_PRICE_THB, 0)}/BTC</div>
+    </div>
+    <div class="card">
       <div class="card-label">กำไร/ขาดทุน (สินทรัพย์อื่น)</div>
       <div class="card-value ${totalAssets - totalCostAssets >= 0 ? 'green' : 'red'}">${totalAssets - totalCostAssets >= 0 ? '+' : ''}฿${fmt(totalAssets - totalCostAssets)}</div>
       <div class="card-sub">จากต้นทุน ฿${fmt(totalCostAssets)}</div>
@@ -3131,6 +3144,11 @@ async function renderAssetsTab() {
       <div class="card-label">กำไร/ขาดทุน (ออมทอง)</div>
       <div class="card-value ${goldPL >= 0 ? 'green' : 'red'}">${goldPL >= 0 ? '+' : ''}฿${fmt(goldPL)}</div>
       <div class="card-sub">จากต้นทุน ฿${fmt(goldCostTotal)}</div>
+    </div>
+    <div class="card">
+      <div class="card-label">กำไร/ขาดทุน (BTC)</div>
+      <div class="card-value ${btcPL >= 0 ? 'green' : 'red'}">${btcPL >= 0 ? '+' : ''}฿${fmt(btcPL)}</div>
+      <div class="card-sub">จากต้นทุน ฿${fmt(btcCostTotal)}</div>
     </div>
   `;
 
@@ -3860,6 +3878,7 @@ async function bootApp() {
   await loadAssetsFromSB();
   await loadImportHistoryFromSB();
   await loadGoldFromSB();
+  await loadBtcFromSB();
 }
 
 // Keyboard support
@@ -4172,13 +4191,205 @@ function renderGoldTab() {
   }).join('');
 }
 
+// ================================================================
+// ==================== BITCOIN (สะสม BTC) =========================
+// ================================================================
+let _btcEntries = [];
+let BTC_PRICE_THB = 0;
+let BTC_PRICE_SOURCE = '';
+let BTC_PRICE_UPDATED = '';
+
+async function fetchBtcPrice() {
+  // แหล่งหลัก: CoinGecko (ไม่ต้อง API key, รองรับ vs_currencies=thb ตรงๆ ไม่ต้องแปลงจาก USD เอง)
+  try {
+    const r = await fetch('https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=thb&include_last_updated_at=true');
+    if (r.ok) {
+      const d = await r.json();
+      const px = d?.bitcoin?.thb;
+      if (px > 0) {
+        BTC_PRICE_THB = px;
+        BTC_PRICE_SOURCE = 'CoinGecko';
+        BTC_PRICE_UPDATED = d.bitcoin.last_updated_at
+          ? new Date(d.bitcoin.last_updated_at * 1000).toLocaleString('th-TH')
+          : new Date().toLocaleString('th-TH');
+        try { localStorage.setItem('btc_price_cache', JSON.stringify({ px, updated: BTC_PRICE_UPDATED })); } catch (e) {}
+        return BTC_PRICE_THB;
+      }
+    }
+  } catch (e) { console.warn('[BTC] CoinGecko failed:', e.message); }
+
+  // สำรอง: Binance (BTCUSDT) แปลงผ่านอัตราแลก THB_RATE ที่มีอยู่แล้วในแอป
+  try {
+    const r = await fetch('https://api.binance.com/api/v3/ticker/price?symbol=BTCUSDT');
+    if (r.ok) {
+      const d = await r.json();
+      const usd = parseFloat(d.price);
+      if (usd > 0 && THB_RATE > 0) {
+        BTC_PRICE_THB = parseFloat((usd * THB_RATE).toFixed(2));
+        BTC_PRICE_SOURCE = '⚠️ ประมาณการจาก Binance (USD) × อัตราแลก';
+        BTC_PRICE_UPDATED = new Date().toLocaleString('th-TH');
+        return BTC_PRICE_THB;
+      }
+    }
+  } catch (e) { console.warn('[BTC] Binance fallback failed:', e.message); }
+
+  // ทุกแหล่งล่ม: ใช้แคชล่าสุดที่เคยดึงได้
+  try {
+    const cached = JSON.parse(localStorage.getItem('btc_price_cache') || 'null');
+    if (cached?.px > 0) {
+      BTC_PRICE_THB = cached.px;
+      BTC_PRICE_SOURCE = '📦 ราคาล่าสุดที่เคยดึงได้ (ดึงสดไม่สำเร็จตอนนี้)';
+      BTC_PRICE_UPDATED = cached.updated || '—';
+      return BTC_PRICE_THB;
+    }
+  } catch (e) {}
+
+  BTC_PRICE_SOURCE = '❌ ดึงราคา BTC ไม่สำเร็จ';
+  BTC_PRICE_UPDATED = '—';
+  return BTC_PRICE_THB;
+}
+
+async function loadBtcFromSB() {
+  try {
+    const { data, error } = await sb.from('btc_entries').select('*').order('date', { ascending: true });
+    if (error) throw error;
+    _btcEntries = (data || []).map(r => ({ ...r, buy_price: parseFloat(r.buy_price), qty: parseFloat(r.qty) }));
+  } catch (e) {
+    _btcEntries = JSON.parse(localStorage.getItem('btc_entries') || '[]');
+  }
+}
+
+async function saveBtcToSB(entry) {
+  const { error } = await sb.from('btc_entries').upsert({ ...entry });
+  if (error) {
+    console.error('[BTC] Supabase upsert error:', error);
+    localStorage.setItem('btc_entries', JSON.stringify(_btcEntries));
+    showToast('⚠️ บันทึก BTC ลง Supabase ไม่สำเร็จ (เก็บไว้ในเครื่องชั่วคราว): ' + (error.message || error.code), 'var(--red)');
+  }
+}
+
+async function initBtcTab() {
+  document.getElementById('btcPriceMeta').textContent = '⏳ กำลังโหลดราคา BTC...';
+  document.getElementById('btcPriceVal').textContent = '—';
+  await fetchBtcPrice();
+  document.getElementById('btcPriceVal').textContent = '฿' + fmt(BTC_PRICE_THB, 0);
+  document.getElementById('btcPriceMeta').innerHTML =
+    `📡 ${BTC_PRICE_SOURCE}${BTC_PRICE_UPDATED && BTC_PRICE_UPDATED !== '—' ? ' · อัปเดต ' + BTC_PRICE_UPDATED : ''}`;
+  renderBtcTab();
+}
+
+async function addBtcEntry() {
+  const buyPrice  = parseFloat(document.getElementById('b_buyPrice').value);
+  const priceMode = document.getElementById('b_priceMode').value; // 'rate' = ต่อ BTC, 'total' = ยอดรวมที่จ่าย
+  const qty       = parseFloat(document.getElementById('b_qty').value);
+  const date      = document.getElementById('b_date').value || new Date().toISOString().slice(0, 10);
+  const note      = document.getElementById('b_note').value.trim();
+
+  if (isNaN(buyPrice) || buyPrice <= 0) { showToast('กรุณากรอกราคาที่ซื้อ', 'var(--red)'); return; }
+  if (isNaN(qty)      || qty      <= 0) { showToast('กรุณากรอกจำนวน BTC', 'var(--red)'); return; }
+
+  // ถ้าเลือก "ยอดรวมที่จ่าย" ให้หารด้วยจำนวน BTC ก่อนเก็บ ให้ buy_price เป็นอัตรา/BTC เสมอ
+  // (เหมือนที่ gold ใช้ — กัน bug ต้นทุนเพี้ยนจากการคูณซ้ำตอนคำนวณ)
+  const buyRatePerBtc = priceMode === 'total' ? parseFloat((buyPrice / qty).toFixed(2)) : buyPrice;
+
+  const entry = {
+    id: 'b' + Date.now(),
+    buy_price: buyRatePerBtc,  // THB ต่อ 1 BTC
+    qty,                        // จำนวน BTC
+    date, note
+  };
+  _btcEntries.push(entry);
+  await saveBtcToSB(entry);
+
+  ['b_buyPrice', 'b_qty', 'b_note'].forEach(id => document.getElementById(id).value = '');
+  showToast('₿ เพิ่มรายการ BTC แล้ว');
+  renderBtcTab();
+}
+
+async function deleteBtcEntry(id) {
+  _btcEntries = _btcEntries.filter(e => e.id !== id);
+  const { error } = await sb.from('btc_entries').delete().eq('id', id);
+  if (error) {
+    console.error('[BTC] Supabase delete error:', error);
+    localStorage.setItem('btc_entries', JSON.stringify(_btcEntries));
+    showToast('⚠️ ลบ BTC ใน Supabase ไม่สำเร็จ: ' + (error.message || error.code), 'var(--red)');
+  }
+  renderBtcTab();
+}
+
+function renderBtcTab() {
+  if (BTC_PRICE_THB <= 0) return;
+
+  let totalCost = 0, totalQty = 0, totalCurrentVal = 0;
+  _btcEntries.forEach(e => {
+    totalCost       += e.buy_price * e.qty;
+    totalQty        += e.qty;
+    totalCurrentVal += BTC_PRICE_THB * e.qty;
+  });
+  const totalPL     = totalCurrentVal - totalCost;
+  const totalPLPct  = totalCost > 0 ? (totalPL / totalCost * 100) : 0;
+  const avgBuyPrice = totalQty > 0 ? totalCost / totalQty : 0;
+
+  document.getElementById('btcCards').innerHTML = `
+    <div class="card">
+      <div class="card-label">₿ จำนวนรวม</div>
+      <div class="card-value">${fmt(totalQty, 8)} BTC</div>
+    </div>
+    <div class="card">
+      <div class="card-label">💸 ต้นทุนรวม</div>
+      <div class="card-value">฿${fmt(totalCost)}</div>
+      <div class="card-sub">avg ฿${fmt(avgBuyPrice, 0)}/BTC</div>
+    </div>
+    <div class="card">
+      <div class="card-label">💰 มูลค่าปัจจุบัน</div>
+      <div class="card-value">฿${fmt(totalCurrentVal)}</div>
+      <div class="card-sub">@ ฿${fmt(BTC_PRICE_THB, 0)}/BTC</div>
+    </div>
+    <div class="card">
+      <div class="card-label">📈 กำไร/ขาดทุน</div>
+      <div class="card-value ${totalPL >= 0 ? 'green' : 'red'}">${totalPL >= 0 ? '+' : ''}฿${fmt(totalPL)}</div>
+      <div class="card-sub ${totalPL >= 0 ? 'green' : 'red'}">${totalPLPct >= 0 ? '+' : ''}${totalPLPct.toFixed(2)}%</div>
+    </div>
+    <div class="card">
+      <div class="card-label">⚖️ avg ราคาซื้อของเรา</div>
+      <div class="card-value" style="font-size:1rem">฿${fmt(avgBuyPrice, 0)}<span style="font-size:0.7rem;color:var(--muted)">/BTC</span></div>
+      <div class="card-sub ${BTC_PRICE_THB >= avgBuyPrice ? 'green' : 'red'}">
+        ปัจจุบัน ${BTC_PRICE_THB >= avgBuyPrice ? '▲ สูงกว่า' : '▼ ต่ำกว่า'} ${fmt(Math.abs(BTC_PRICE_THB - avgBuyPrice), 0)} THB/BTC
+      </div>
+    </div>
+  `;
+
+  const tbody = document.getElementById('btcBody');
+  if (_btcEntries.length === 0) {
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;color:var(--muted);padding:24px">ยังไม่มีรายการ — กรอกด้านบนเพื่อเพิ่ม</td></tr>`;
+    return;
+  }
+  tbody.innerHTML = _btcEntries.map((e, i) => {
+    const currentVal = BTC_PRICE_THB * e.qty;
+    const cost       = e.buy_price * e.qty;
+    const pl         = currentVal - cost;
+    const plPct      = cost > 0 ? (pl / cost * 100) : 0;
+    return `<tr>
+      <td class="mono" style="color:var(--muted)">${i + 1}</td>
+      <td class="mono" style="color:var(--muted)">${e.date || '—'}</td>
+      <td class="mono">฿${fmt(e.buy_price, 0)}<span style="color:var(--muted);font-size:0.75rem">/BTC</span></td>
+      <td class="mono">${fmt(e.qty, 8)} BTC</td>
+      <td class="mono">฿${fmt(BTC_PRICE_THB, 0)}<span style="color:var(--muted);font-size:0.75rem">/BTC</span></td>
+      <td class="mono ${pl >= 0 ? 'green' : 'red'}">${pl >= 0 ? '+' : ''}฿${fmt(pl, 0)}</td>
+      <td class="mono ${plPct >= 0 ? 'green' : 'red'}">${plPct >= 0 ? '+' : ''}${plPct.toFixed(2)}%</td>
+      <td style="color:var(--muted);font-size:0.8rem">${e.note || ''}</td>
+      <td><button class="btn-icon del" onclick="deleteBtcEntry('${e.id}')">✕</button></td>
+    </tr>`;
+  }).join('');
+}
+
 
 // ================================================================
 // ==================== BACKUP / RESTORE ==========================
 // ================================================================
 const BACKUP_TABLES = [
   'stocks', 'price_history', 'chart_drawings', 'price_alerts',
-  'wallet_transactions', 'other_assets', 'import_history', 'gold_entries'
+  'wallet_transactions', 'other_assets', 'import_history', 'gold_entries', 'btc_entries'
 ];
 
 async function backupAllData() {
@@ -4256,7 +4467,7 @@ async function restoreAllData(event) {
 
   // ลำดับสำคัญ: stocks ก่อน เพราะตารางอื่นอ้างอิง ticker จาก stocks
   const order = ['stocks', 'price_history', 'chart_drawings', 'price_alerts',
-                 'wallet_transactions', 'other_assets', 'import_history', 'gold_entries'];
+                 'wallet_transactions', 'other_assets', 'import_history', 'gold_entries', 'btc_entries'];
 
   for (const table of order) {
     if (!tablesInFile.includes(table)) continue;

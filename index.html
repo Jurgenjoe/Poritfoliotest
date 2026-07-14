@@ -87,6 +87,7 @@
   <button class="tab-btn" onclick="switchTab('assets')">🏦 สินทรัพย์อื่น</button>
   <button class="tab-btn" onclick="switchTab('import')">📄 Import PDF</button>
   <button class="tab-btn" onclick="switchTab('gold')">🥇 ออมทอง</button>
+  <button class="tab-btn" onclick="switchTab('bitcoin')">₿ บิตคอยน์</button>
   <button class="tab-btn" onclick="switchTab('news')">📰 ข่าว</button>
   <button class="tab-btn" onclick="switchTab('feargreed')">😨 Fear &amp; Greed</button>
 </div>
@@ -371,6 +372,64 @@
         <th></th>
       </tr></thead>
       <tbody id="goldBody"></tbody>
+    </table>
+  </div>
+</div>
+</div>
+
+<!-- ===== TAB: BITCOIN ===== -->
+<div id="tab_bitcoin" class="tab-page">
+<div class="main">
+  <div class="page-header" style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">
+    <h2>₿ บิตคอยน์</h2>
+    <div class="gold-price-banner" id="btcPriceBanner">
+      <div class="gold-price-banner-label">Bitcoin (BTC)</div>
+      <div class="gold-price-row">
+        <div class="gold-price-box">
+          <div class="gold-price-box-label">ราคาปัจจุบัน</div>
+          <div class="gold-price-box-val" id="btcPriceVal">—</div>
+        </div>
+      </div>
+      <div class="gold-price-meta" id="btcPriceMeta">⏳ กำลังโหลดราคา BTC...</div>
+      <button class="btn-icon" onclick="initBtcTab()" title="รีเฟรชราคา BTC" style="margin-left:auto">🔄</button>
+    </div>
+  </div>
+  <div class="summary-grid" id="btcCards"></div>
+
+  <!-- Add form -->
+  <div class="chart-card" style="margin-top:18px">
+    <div class="chart-title">➕ เพิ่มรายการซื้อ BTC</div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-top:12px">
+      <input class="search-box" type="number" id="b_buyPrice" placeholder="ราคาที่ซื้อ" style="max-width:160px">
+      <select class="dropdown" id="b_priceMode">
+        <option value="rate">฿/BTC (อัตรา)</option>
+        <option value="total">ยอดรวมที่จ่าย</option>
+      </select>
+      <input class="search-box" type="number" step="0.00000001" id="b_qty" placeholder="จำนวน BTC" style="max-width:160px">
+      <input class="search-box" type="date" id="b_date" style="max-width:150px">
+      <input class="search-box" type="text" id="b_note" placeholder="หมายเหตุ" style="max-width:180px">
+      <button class="btn btn-primary" onclick="addBtcEntry()">+ เพิ่ม</button>
+    </div>
+    <div style="margin-top:8px;font-size:0.78rem;color:var(--muted)">
+      💡 ถ้าคุณจ่ายเป็นก้อนเดียว (เช่น จ่าย 10,000 บาท ซื้อ 0.0015 BTC) ให้เลือก "ยอดรวมที่จ่าย" ระบบจะคำนวณอัตรา/BTC ให้เอง
+    </div>
+  </div>
+
+  <!-- Table -->
+  <div class="table-wrap" style="margin-top:18px">
+    <table>
+      <thead><tr>
+        <th>#</th>
+        <th>วันที่</th>
+        <th>ราคาที่ซื้อ (THB)</th>
+        <th>จำนวน BTC</th>
+        <th>ราคาปัจจุบัน (THB)</th>
+        <th>บวก/ลบ (THB)</th>
+        <th>%</th>
+        <th>หมายเหตุ</th>
+        <th></th>
+      </tr></thead>
+      <tbody id="btcBody"></tbody>
     </table>
   </div>
 </div>

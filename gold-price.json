@@ -2,15 +2,15 @@
   "status": "success",
   "response": {
     "update_date": "28/07/2026",
-    "update_time": "17:07",
+    "update_time": "19:21",
     "price": {
       "gold": {
-        "buy": "67160",
-        "sell": "67360"
+        "buy": "66549",
+        "sell": "66749"
       },
       "gold_bar": {
-        "buy": "67160",
-        "sell": "67360"
+        "buy": "66549",
+        "sell": "66749"
       }
     }
   }

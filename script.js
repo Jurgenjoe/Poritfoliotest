@@ -359,6 +359,10 @@ function renderLineChart(tf) {
   const realPointByDate = {};
   realPoints.forEach(p => { realPointByDate[new Date(p.t).toISOString().slice(0, 10)] = p.m; });
 
+  // แผนที่ % เปลี่ยนแปลงรายวันที่บันทึกไว้จริง (ตัวเดียวกับตารางรายสัปดาห์) — ใช้โชว์ในทูลทิปถ้ามีข้อมูลวันนั้น
+  const dailyPctByDate = {};
+  (_dailyPct || []).forEach(r => { dailyPctByDate[r.date] = r.pct; });
+
   // ---- เส้นเดียว: เริ่มต้นที่ $100 เป๊ะ แล้วไต่รูปทรงเดียวกับผลตอบแทน % จริงของพอร์ต
   // แต่ปรับสเกลให้จุดสุดท้าย (วันนี้) จบที่ "มูลค่าพอร์ตจริง" (realTodayUSD) พอดี ไม่ใช่แค่
   // ดัชนีเล็กๆ อีกต่อไป — คือ remap ช่วง multiplier [1 .. todayMultiplier] เป็นเส้นตรงไปยัง
@@ -367,7 +371,7 @@ function renderLineChart(tf) {
   const INDEX_BASE = 100; // เริ่มนับที่ $100 เสมอ
   const mRange = todayMultiplier - 1; // ช่วงของ multiplier จากจุดเริ่ม (1.0) ถึงวันนี้
   const shortRange = (tf === '1W' || tf === '1M');
-  const labels = [], values = [], pointColors = [];
+  const labels = [], values = [], pointColors = [], pctCumValues = [], pctDayValues = [];
   dates.forEach((dateKey) => {
     const isRealPoint = Object.prototype.hasOwnProperty.call(realPointByDate, dateKey);
     const m = isRealPoint ? realPointByDate[dateKey] : estimateAt(new Date(dateKey).getTime(), dateKey);
@@ -383,6 +387,10 @@ function renderLineChart(tf) {
     labels.push(lbl);
     values.push(parseFloat(dispVal.toFixed(2)));
     pointColors.push(isRealPoint ? '#8b5cf6' : 'rgba(90,100,120,0.5)');
+    // % กำไร/ขาดทุนสะสมตั้งแต่เริ่มลงทุน ณ จุดนั้น (m=1 คือเท่าทุนพอดี) — มีให้ทุกจุด ทั้งจุดจริงและจุดประมาณ
+    pctCumValues.push((m - 1) * 100);
+    // % เปลี่ยนแปลงของวันนั้นวันเดียว (ถ้ามีบันทึกไว้จริงในระบบ daily_pct) — ไม่มีก็เป็น null
+    pctDayValues.push(Object.prototype.hasOwnProperty.call(dailyPctByDate, dateKey) ? dailyPctByDate[dateKey] : null);
   });
 
   // ---- อัปเดตส่วนหัว (hero): มูลค่ารวมวันนี้, THB equivalent, % กำไรสะสม, อัตราแลกเปลี่ยน ----
@@ -397,6 +405,21 @@ function renderLineChart(tf) {
   if (heroGainEl) {
     const isPos = totalPctToday >= 0;
     heroGainEl.innerHTML = `กำไรของสินทรัพย์ที่ถืออยู่: <span class="${isPos ? 'green' : 'red'}">${isPos ? '↗' : '↘'} ${Math.abs(totalPctToday).toFixed(2)}%</span>`;
+  }
+  const heroDayPctEl = document.getElementById('heroDayPct');
+  if (heroDayPctEl) {
+    // ใช้ค่าเดียวกับตารางเปลี่ยนแปลงรายสัปดาห์ (finalized ถ้าตลาดปิดแล้ว, ไม่งั้นคำนวณสด) เพื่อให้ตัวเลขตรงกันทั้งแอป
+    const todayKeyHero = nyseSessionStatus().dateKey;
+    const rec = _dailyPct.find(r => r.date === todayKeyHero);
+    const dayPct = (rec && (rec.finalized || rec.pct !== 0)) ? rec.pct : computePortfolioDayChangePct();
+    if (dayPct === null || dayPct === undefined) {
+      heroDayPctEl.innerHTML = `วันนี้: <span class="flat">–</span>`;
+    } else {
+      const dp = parseFloat(dayPct);
+      const cls = dp > 0 ? 'green' : (dp < 0 ? 'red' : 'flat');
+      const arrow = dp > 0 ? '↗' : (dp < 0 ? '↘' : '→');
+      heroDayPctEl.innerHTML = `วันนี้: <span class="${cls}">${arrow} ${dp >= 0 ? '+' : ''}${dp.toFixed(2)}%</span>`;
+    }
   }
   if (heroFxEl) heroFxEl.textContent = `อัตราแลกเปลี่ยน: 🇺🇸 1 USD = ${THB_RATE.toFixed(2)} บาท`;
 
@@ -447,6 +470,23 @@ function renderLineChart(tf) {
             label: (item) => {
               const cur = currency === 'THB' ? '฿' : '$';
               return `${item.dataset.label}: ${cur}${fmt(item.parsed.y)}`;
+            },
+            afterLabel: (item) => {
+              const idx = item.dataIndex;
+              const lines = [];
+              const cumPct = pctCumValues[idx];
+              if (cumPct !== undefined) {
+                const sign = cumPct >= 0 ? '+' : '';
+                lines.push(`กำไรสะสม: ${sign}${cumPct.toFixed(2)}%`);
+              }
+              const dayPct = pctDayValues[idx];
+              if (dayPct !== null && dayPct !== undefined) {
+                const sign = dayPct >= 0 ? '+' : '';
+                lines.push(`เปลี่ยนแปลงวันนั้น: ${sign}${dayPct.toFixed(2)}%`);
+              } else if (!pointColors[idx] || pointColors[idx] !== '#8b5cf6') {
+                lines.push('เปลี่ยนแปลงวันนั้น: ไม่มีข้อมูลบันทึกไว้ (จุดประมาณ)');
+              }
+              return lines;
             }
           }
         }

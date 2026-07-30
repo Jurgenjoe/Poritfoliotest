@@ -926,6 +926,11 @@
 .hero-gain span { font-weight: 700; }
 .hero-gain span.green { color: var(--green); }
 .hero-gain span.red { color: var(--red); }
+.hero-daypct { font-size: 0.8rem; color: var(--muted); margin-top: 4px; }
+.hero-daypct span { font-weight: 700; }
+.hero-daypct span.green { color: var(--green); }
+.hero-daypct span.red { color: var(--red); }
+.hero-daypct span.flat { color: var(--muted); }
 .hero-fxrate { font-size: 0.72rem; color: var(--muted); margin-top: 4px; margin-bottom: 10px; }
 .tf-row { display: flex; gap: 4px; flex-wrap: wrap; margin-top: 10px; justify-content: center; }
 .tf-row .tf-btn { padding: 3px 10px; border-radius: 14px; font-size: .7rem; }

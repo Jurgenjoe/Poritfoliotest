@@ -2640,7 +2640,9 @@ function checkPriceAlerts() {
       a.triggered = true;
       fireAlertToast(a, price);
       sendLineNotification(`🔔 ${a.ticker} ${a.cond==='above'?'ขึ้นถึง':'ลงถึง'} $${fmt(a.price)}\nราคาปัจจุบัน: $${fmt(price)}`);
-      sb.from('price_alerts').update({ triggered: true }).eq('id', a.id).then(()=>{}).catch(()=>{});
+      // ถึงเงื่อนไขแล้ว ลบทิ้งจาก Supabase เลย (ไม่ค้างเป็น triggered:true) —
+      // ให้ตรงกับที่ GitHub Actions cron (check-price-alerts.yml) ทำเวลาไม่ได้เปิดเว็บอยู่
+      sb.from('price_alerts').delete().eq('id', a.id).then(()=>{}).catch(()=>{});
       if (detailState.open && detailState.ticker===a.ticker) { renderAlertsUI(); drawChart(); }
     }
   });

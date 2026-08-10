@@ -2878,28 +2878,37 @@ async function addWalletTx() {
   if (isNaN(amount) || amount <= 0) { showToast('กรุณากรอกจำนวนเงิน', 'var(--red)'); return; }
 
   let tx;
+  const idSuffix = Date.now() + Math.random().toString(36).slice(2, 6);
   if (type === 'interest') {
     // เงินฝาก/ดอกเบี้ย (THB): เก็บเป็น THB ล้วนๆ ไม่มีอัตราแลก ไม่กระทบ avg rate หรือ FX P&L ของการแลกเงินเลย
-    tx = { id: 'w' + Date.now(), type: 'interest', amount, rate: 0, usd: 0, date, note: note || 'ฝากเงิน/ดอกเบี้ย' };
+    tx = { id: 'w' + idSuffix, type: 'interest', amount, rate: 0, usd: 0, date, note: note || 'ฝากเงิน/ดอกเบี้ย' };
   } else if (type === 'interest_usd') {
     // เงินฝาก/ดอกเบี้ย (USD): เก็บเป็น USD ตรงๆ ไม่มีอัตราแลก ไม่กระทบ avg rate หรือ FX P&L
     // แต่จะถูกรวมเข้า "USD คงเหลือ" ทันที (เหมือนได้ USD เพิ่มมาโดยไม่ต้องแลกเงิน)
-    tx = { id: 'w' + Date.now(), type: 'interest_usd', amount: 0, rate: 0, usd: amount, date, note: note || 'ฝากเงิน/ดอกเบี้ย (USD)' };
+    tx = { id: 'w' + idSuffix, type: 'interest_usd', amount: 0, rate: 0, usd: amount, date, note: note || 'ฝากเงิน/ดอกเบี้ย (USD)' };
   } else {
     const rate = parseFloat(document.getElementById('txRate').value);
     if (isNaN(rate) || rate <= 0) { showToast('กรุณากรอกอัตราแลก THB/USD', 'var(--red)'); return; }
     const usd = parseFloat((amount / rate).toFixed(4));
-    tx = { id: 'w' + Date.now(), type: 'fx_buy', amount, rate, usd, date, note };
+    tx = { id: 'w' + idSuffix, type: 'fx_buy', amount, rate, usd, date, note };
   }
   _walletTxs.push(tx);
 
-  const { error } = await sb.from('wallet_transactions').insert({ ...tx });
-  if (error) {
-    console.error('[Wallet] Supabase insert error:', error);
+  try {
+    const { error } = await sb.from('wallet_transactions').insert({ ...tx });
+    if (error) {
+      console.error('[Wallet] Supabase insert error:', error);
+      localStorage.setItem('wallet_txs', JSON.stringify(_walletTxs));
+      showToast('⚠️ บันทึกลง Supabase ไม่สำเร็จ (เก็บไว้ในเครื่องชั่วคราว): ' + (error.message || error.code), 'var(--red)');
+    } else {
+      showToast(type === 'interest' ? '🏦 บันทึกเงินฝาก/ดอกเบี้ย (THB) แล้ว' : type === 'interest_usd' ? '💵 บันทึกเงินฝาก/ดอกเบี้ย (USD) แล้ว' : '💱 บันทึกการแลกเงินแล้ว');
+    }
+  } catch (e) {
+    // เผื่อ sb.from(...).insert(...) throw ตรงๆ (เช่น network ล่ม / client ยังไม่พร้อม)
+    // กันไม่ให้รายการหายไปเงียบๆ โดยไม่แสดงอะไรเลย
+    console.error('[Wallet] Insert threw exception:', e);
     localStorage.setItem('wallet_txs', JSON.stringify(_walletTxs));
-    showToast('⚠️ บันทึกลง Supabase ไม่สำเร็จ (เก็บไว้ในเครื่องชั่วคราว): ' + (error.message || error.code), 'var(--red)');
-  } else {
-    showToast(type === 'interest' ? '🏦 บันทึกเงินฝาก/ดอกเบี้ย (THB) แล้ว' : type === 'interest_usd' ? '💵 บันทึกเงินฝาก/ดอกเบี้ย (USD) แล้ว' : '💱 บันทึกการแลกเงินแล้ว');
+    showToast('⚠️ บันทึกลง Supabase ไม่สำเร็จ (เก็บไว้ในเครื่องชั่วคราว): ' + (e.message || e), 'var(--red)');
   }
 
   ['txAmount', 'txRate', 'txNote'].forEach(id => document.getElementById(id).value = '');
@@ -3568,7 +3577,7 @@ function renderImportHistory() {
   tbody.innerHTML = _importHistory.length === 0
     ? `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">ยังไม่มีประวัติการ Import</td></tr>`
     : _importHistory.map(h => `<tr>
-        <td class="mono" style="color:var(--muted);font-size:0.78rem">${h.imported_at ? new Date(h.imported_at).toLocaleString('th-TH') : ''}</td>
+        <td class="mono" style="color:var(--muted);font-size:0.78rem">${h.effective_date || (h.imported_at ? new Date(h.imported_at).toLocaleDateString('th-TH') : '')}</td>
         <td class="mono" style="font-size:0.75rem">${h.invoice_no || '—'}</td>
         <td style="font-weight:700;color:var(--accent)">${h.ticker}</td>
         <td class="mono">${fmt(h.shares, 4)}</td>

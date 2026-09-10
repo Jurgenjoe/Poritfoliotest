@@ -2629,23 +2629,37 @@ async function loadAlertsFromSB() {
   }
 }
 
-function checkPriceAlerts() {
+async function checkPriceAlerts() {
   if (!detailState.alerts.length) return;
-  detailState.alerts.forEach(a => {
-    if (a.triggered) return;
+  const toCheck = detailState.alerts.filter(a => !a.triggered);
+  for (const a of toCheck) {
     const price = livePrices[a.ticker]?.price;
-    if (price == null) return;
-    const hit = a.cond==='above' ? price >= a.price : price <= a.price;
-    if (hit) {
-      a.triggered = true;
+    if (price == null) continue;
+    const hit = a.cond === 'above' ? price >= a.price : price <= a.price;
+    if (!hit) continue;
+
+    a.triggered = true; // เอาออกจากรายการที่ยังต้องเช็คในแท็บนี้ทันที ไม่ว่าใครจะ "ชนะ" การแจ้งเตือนก็ตาม
+
+    // กันแจ้งเตือนซ้ำ (LINE เด้งหลายครั้ง) เวลาเปิดเว็บพร้อมกันหลายแท็บ/หลายเครื่อง
+    // หรือแท็บที่เปิดค้างชนกับ GitHub Actions cron (check-price-alerts.yml) ที่เช็คพร้อมกัน:
+    // ให้ "ลบแถวใน Supabase ก่อน" แล้วเช็คว่าแถวนี้ยังอยู่จริงตอนที่เราลบไหม (ใครลบสำเร็จคนแรกคือคนได้แจ้งเตือน)
+    // ถ้าอีกฝั่งลบไปแล้วก่อนเรา .select() ที่ตามหลัง delete จะได้ array ว่างกลับมา — แปลว่าไม่ต้องแจ้งซ้ำ
+    let wonRace = true;
+    try {
+      const { data, error } = await sb.from('price_alerts').delete().eq('id', a.id).select();
+      if (error) throw error;
+      wonRace = Array.isArray(data) && data.length > 0;
+    } catch (e) {
+      // ถ้าเช็คกับ Supabase ไม่ได้เลย (ออฟไลน์/ไม่มีตาราง) ให้แจ้งเตือนไปตามเดิม ดีกว่าเงียบไปเฉยๆ
+      wonRace = true;
+    }
+
+    if (wonRace) {
       fireAlertToast(a, price);
       sendLineNotification(`🔔 ${a.ticker} ${a.cond==='above'?'ขึ้นถึง':'ลงถึง'} $${fmt(a.price)}\nราคาปัจจุบัน: $${fmt(price)}`);
-      // ถึงเงื่อนไขแล้ว ลบทิ้งจาก Supabase เลย (ไม่ค้างเป็น triggered:true) —
-      // ให้ตรงกับที่ GitHub Actions cron (check-price-alerts.yml) ทำเวลาไม่ได้เปิดเว็บอยู่
-      sb.from('price_alerts').delete().eq('id', a.id).then(()=>{}).catch(()=>{});
-      if (detailState.open && detailState.ticker===a.ticker) { renderAlertsUI(); drawChart(); }
     }
-  });
+    if (detailState.open && detailState.ticker===a.ticker) { renderAlertsUI(); drawChart(); }
+  }
   // prune triggered after firing once
   detailState.alerts = detailState.alerts.filter(a=>!a.triggered);
 }
@@ -3572,7 +3586,26 @@ function cancelImport() {
   document.getElementById('pdfInput').value = '';
 }
 
+// วันที่ในการ์ด effective_date เป็น string รูปแบบ "DD/MM/YYYY" (จาก PDF/รูปที่ import เข้ามา)
+// ต้อง parse เป็นวันที่จริงก่อนเรียง ไม่งั้นจะเรียงผิด (string เรียงแบบ lexicographic ไม่ตรงลำดับเวลา)
+// และไม่ควรพึ่งลำดับการ insert (imported_at) เพราะ import ย้อนหลัง/หลายรายการพร้อมกันจะทำให้ลำดับผิด
+function _importHistSortKey(h) {
+  if (h.effective_date) {
+    const m = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(String(h.effective_date).trim());
+    if (m) {
+      const [, d, mo, y] = m;
+      const t = new Date(`${y}-${mo.padStart(2, '0')}-${d.padStart(2, '0')}T00:00:00`).getTime();
+      if (!isNaN(t)) return t;
+    }
+  }
+  return h.imported_at ? new Date(h.imported_at).getTime() : 0;
+}
+function sortImportHistory() {
+  _importHistory.sort((a, b) => _importHistSortKey(b) - _importHistSortKey(a));
+}
+
 function renderImportHistory() {
+  sortImportHistory();
   const tbody = document.getElementById('importHistBody');
   tbody.innerHTML = _importHistory.length === 0
     ? `<tr><td colspan="7" style="text-align:center;color:var(--muted);padding:24px">ยังไม่มีประวัติการ Import</td></tr>`

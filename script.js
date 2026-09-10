@@ -2940,25 +2940,31 @@ async function deleteWalletTx(id) {
   renderWalletTab();
 }
 
+// USD คงเหลือในกระเป๋า (ยังไม่ได้ลงทุน) — ใช้ร่วมกันทั้งแท็บ Wallet และแท็บ Assets (Net Worth)
+// เพื่อไม่ให้สองที่คำนวณไม่ตรงกันเหมือนที่เคยเป็นบั๊ก
+function computeUsdCashBalance() {
+  const fxBuyUSD = _walletTxs.filter(t => t.type === 'fx_buy').reduce((a, t) => a + (t.usd || 0), 0);
+  const interestUSD = _walletTxs.filter(t => t.type === 'interest_usd').reduce((a, t) => a + (t.usd || 0), 0);
+  // เงินสดจริงที่ได้กลับมาตอนขาย (รวมกำไร/ขาดทุนจากการขายไปด้วย) — ไม่ใช่แค่ต้นทุนที่ถูกปลดออกจากพอร์ต
+  // ตัวเก่าที่ import ก่อนอัปเดตนี้จะยังไม่มี realized_pnl_usd (เป็น undefined) จึงนับเป็น 0 ไปก่อน
+  // แปลว่าตัวเลขของการขายเก่าๆ จะยังไม่ถูกต้อง 100% จนกว่าจะ import/แก้ใหม่
+  const realizedPnlUSD = _walletTxs.filter(t => t.type === 'sell_return').reduce((a, t) => a + (t.realized_pnl_usd || 0), 0);
+  const portfolioCostUSD = _stocks.reduce((a, s) => a + (parseFloat(s.cost || 0) * parseFloat(s.shares || 0)), 0);
+  const usdBalance = fxBuyUSD + interestUSD + realizedPnlUSD - portfolioCostUSD;
+  return { fxBuyUSD, interestUSD, realizedPnlUSD, portfolioCostUSD, usdBalance };
+}
+
 function renderWalletTab() {
   // รวม fx_buy (manual) + exchange (legacy auto-import ก่อน v3)
   const fxTxs      = _walletTxs.filter(t => t.type === 'fx_buy' || t.type === 'deposit');
   const fxBuyTHB   = _walletTxs.filter(t => t.type === 'fx_buy').reduce((a, t) => a + t.amount, 0);
-  const fxBuyUSD   = _walletTxs.filter(t => t.type === 'fx_buy').reduce((a, t) => a + (t.usd || 0), 0);
   const legacyTHB  = _walletTxs.filter(t => t.type === 'deposit').reduce((a, t) => a + t.amount, 0); // legacy ฝากเงิน
   const totalFxTHB = fxBuyTHB + legacyTHB;
 
-  // ต้นทุน USD จากพอร์ตหุ้น (_stocks) — ดึงตรงจาก portfolio
-  const portfolioCostUSD = _stocks.reduce((a, s) => a + (parseFloat(s.cost || 0) * parseFloat(s.shares || 0)), 0);
+  const { fxBuyUSD, interestUSD, portfolioCostUSD, usdBalance } = computeUsdCashBalance();
   // ต้นทุน THB = cost USD × avg rate ที่แลก
   const avgRate = fxBuyUSD > 0 ? fxBuyTHB / fxBuyUSD : THB_RATE;
   const portfolioCostTHB = portfolioCostUSD * avgRate;
-
-  // เงินฝาก/ดอกเบี้ยที่ฝากเป็น USD โดยตรง (ไม่ผ่านอัตราแลก) — บวกเข้า USD คงเหลือทันที
-  const interestUSD = _walletTxs.filter(t => t.type === 'interest_usd').reduce((a, t) => a + (t.usd || 0), 0);
-
-  // USD คงเหลือ = USD แลกมา + USD ฝาก/ดอกเบี้ยตรง - ต้นทุน USD ในพอร์ต
-  const usdBalance = fxBuyUSD + interestUSD - portfolioCostUSD;
 
   // กำไร/ขาดทุนค่าเงิน (FX P&L):
   // มูลค่าพอร์ตปัจจุบัน (THB) = _stocks.reduce price × shares × currentRate
@@ -3158,6 +3164,11 @@ async function renderAssetsTab() {
   const totalCostAssets = _assets.reduce((a, x) => a + (x.cost || 0), 0);
   const stocksValueTHB = getStocks().reduce((a, s) => a + parseFloat(s.price) * parseFloat(s.shares), 0) * THB_RATE;
 
+  // เงินสด USD ที่ยังไม่ได้ลงทุน (เหลือในกระเป๋า) — แปลงเป็น THB ด้วยอัตราวันนี้
+  // เดิม Net Worth ไม่เคยรวมเงินสดตรงนี้เลย ทำให้ยอดรวมน้อยกว่าความจริงเท่ากับเงินสดที่เหลือ
+  const { usdBalance: walletUsdBalance } = computeUsdCashBalance();
+  const walletCashTHB = walletUsdBalance * THB_RATE;
+
   // มูลค่าปัจจุบันของออมทอง (จากแท็บ "ออมทอง" — น้ำหนักรวมทุกรายการ x ราคารับซื้อปัจจุบัน)
   const goldWeightTotal = _goldEntries.reduce((a, e) => a + e.weight, 0);
   const goldCostTotal = _goldEntries.reduce((a, e) => a + e.buy_price * e.weight, 0);
@@ -3170,7 +3181,7 @@ async function renderAssetsTab() {
   const btcValueTHB = BTC_PRICE_THB * btcQtyTotal;
   const btcPL = btcValueTHB - btcCostTotal;
 
-  const netWorth = totalAssets + stocksValueTHB + goldValueTHB + btcValueTHB;
+  const netWorth = totalAssets + stocksValueTHB + goldValueTHB + btcValueTHB + walletCashTHB;
 
   const typeLabels = { crypto: 'Crypto', property: 'อสังหา', gold: 'ทอง', cash: 'เงินสด', fund: 'กองทุน', other: 'อื่น ๆ' };
 
@@ -3178,7 +3189,12 @@ async function renderAssetsTab() {
     <div class="card">
       <div class="card-label">Net Worth รวม (THB)</div>
       <div class="card-value" style="color:var(--gold)">฿${fmt(netWorth)}</div>
-      <div class="card-sub">หุ้น + สินทรัพย์อื่น + ออมทอง + BTC</div>
+      <div class="card-sub">หุ้น + สินทรัพย์อื่น + ออมทอง + BTC + เงินสดในกระเป๋า</div>
+    </div>
+    <div class="card">
+      <div class="card-label">💵 เงินสดในกระเป๋า (THB)</div>
+      <div class="card-value ${walletCashTHB >= 0 ? '' : 'red'}">฿${fmt(walletCashTHB)}</div>
+      <div class="card-sub">≈ $${fmt(walletUsdBalance)} USD ยังไม่ได้ลงทุน</div>
     </div>
     <div class="card">
       <div class="card-label">สินทรัพย์อื่น (THB)</div>
@@ -3466,6 +3482,7 @@ function parseAllDimeRows(text) {
 // helper: process one parsed row into portfolio + wallet + history
 async function processSingleImportRow(p) {
   const existing = _stocks.findIndex(s => s.ticker === p.ticker);
+  let realizedPnlUSD = 0; // เฉพาะตอน SELL — กำไร/ขาดทุนจริงเทียบกับต้นทุนเฉลี่ย ณ ตอนขาย
   if (p.txType === 'BUY') {
     if (existing >= 0) {
       const s = _stocks[existing];
@@ -3485,6 +3502,8 @@ async function processSingleImportRow(p) {
     }
   } else if (p.txType === 'SELL') {
     if (existing >= 0) {
+      const avgCostAtSale = parseFloat(_stocks[existing].cost) || 0;
+      realizedPnlUSD = (p.grossUSD || 0) - avgCostAtSale * p.shares;
       const remainingShares = parseFloat(_stocks[existing].shares) - p.shares;
       if (remainingShares <= 0) {
         const removed = _stocks.splice(existing, 1)[0];
@@ -3504,6 +3523,7 @@ async function processSingleImportRow(p) {
       id: 'w' + Date.now() + Math.random().toString(36).slice(2, 6),
       type: p.txType === 'SELL' ? 'sell_return' : 'stock_buy_usd',
       amount: p.grossTHB, rate: p.fxRate, usd: p.grossUSD, date: dateStr,
+      realized_pnl_usd: p.txType === 'SELL' ? realizedPnlUSD : 0,
       note: `${p.txType === 'SELL' ? 'ขาย' : 'ซื้อ'} ${p.ticker} ${fmt(p.shares, 4)} หุ้น (PDF Import)`
     };
     _walletTxs.push(tx);
@@ -3823,6 +3843,7 @@ async function confirmImageImport() {
 
   try {
     const dateStr = p.date || new Date().toISOString().slice(0, 10);
+    let realizedPnlUSD = 0; // เฉพาะตอน SELL — กำไร/ขาดทุนจริงเทียบกับต้นทุนเฉลี่ย ณ ตอนขาย
 
     if (p.type === 'stock_buy' && p.ticker) {
       const existing = _stocks.findIndex(s => s.ticker === p.ticker);
@@ -3846,6 +3867,8 @@ async function confirmImageImport() {
       } else if ((p.txType || 'BUY') === 'SELL') {
         // ลดหุ้นในพอร์ต
         if (existing >= 0) {
+          const avgCostAtSale = parseFloat(_stocks[existing].cost) || 0;
+          realizedPnlUSD = (p.grossUSD || 0) - avgCostAtSale * shares;
           const remainingShares = parseFloat(_stocks[existing].shares) - shares;
           if (remainingShares <= 0) {
             const removed = _stocks.splice(existing, 1)[0];
@@ -3880,7 +3903,8 @@ async function confirmImageImport() {
         id: 'w' + Date.now(),
         type: isSell ? 'sell_return' : 'stock_buy_usd',
         amount: p.grossTHB, rate: p.fxRate || THB_RATE,
-        usd: p.grossUSD || (p.fxRate ? p.grossTHB / p.fxRate : null), date: dateStr, note
+        usd: p.grossUSD || (p.fxRate ? p.grossTHB / p.fxRate : null), date: dateStr, note,
+        realized_pnl_usd: isSell ? realizedPnlUSD : 0
       };
       _walletTxs.push(tx);
       try { await sb.from('wallet_transactions').insert({ ...tx }); } catch (e) { }

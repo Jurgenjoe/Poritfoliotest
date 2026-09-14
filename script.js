@@ -3837,6 +3837,27 @@ async function confirmImageImport() {
     orderId: document.getElementById('oi_orderId').value.trim() || null,
     note: document.getElementById('oi_note').value.trim() || null
   };
+  // กันนำเข้าซ้ำ — ไม่มี dedup มาก่อนในเส้นทาง import จากรูปภาพ (ต่างจาก import จาก PDF ที่เช็ค
+  // order_id ซ้ำอยู่แล้ว) ทำให้อัปโหลดสลิปเดิมซ้ำ 2 รอบ (เช่น เผลอกดยืนยันซ้ำ หรืออัปโหลดรูปเดิมอีกครั้ง
+  // เพื่อแก้ข้อมูล) จะบวกจำนวนหุ้น/ต้นทุนซ้ำเข้าไปเงียบๆ โดยไม่มีการเตือน ทำให้ต้นทุนเฉลี่ยเพี้ยน
+  if (p.type === 'stock_buy' && p.ticker) {
+    await loadImportHistoryFromSB();
+    const isDup = _importHistory.some(h =>
+      (p.orderId && h.order_id === p.orderId) ||
+      (!p.orderId && h.ticker === p.ticker && h.tx_type === (p.txType || 'BUY') &&
+        h.effective_date === (p.date || null) &&
+        Math.abs((parseFloat(h.shares) || 0) - (p.shares || 0)) < 0.0001 &&
+        Math.abs((parseFloat(h.unit_price) || 0) - (p.unitPrice || 0)) < 0.0001)
+    );
+    if (isDup) {
+      const proceed = confirm(
+        `⚠️ ดูเหมือนรายการนี้ (${p.ticker} ${p.txType || 'BUY'} ${p.shares} หุ้น @ ${p.unitPrice}) เคยนำเข้าไปแล้ว\n\n` +
+        `นำเข้าซ้ำอีกครั้งจะบวกจำนวนหุ้น/ต้นทุนซ้ำเข้าไปในพอร์ต — กดตกลงถ้ามั่นใจว่าเป็นรายการซื้อคนละไม้จริงๆ (ไม่ใช่ยันสลิปเดิม)`
+      );
+      if (!proceed) { return; }
+    }
+  }
+
   const btn = document.getElementById('imageConfirmBtn');
   btn.disabled = true;
   btn.textContent = '⏳ กำลังนำเข้า...';

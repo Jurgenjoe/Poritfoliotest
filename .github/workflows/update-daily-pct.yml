@@ -44,75 +44,98 @@ jobs:
               with urllib.request.urlopen(req, timeout=15) as r:
                   return r.status
 
-          today = datetime.date.today().isoformat()
+          today = datetime.date.today()
 
           # ---- 0) วันหยุดตลาดหุ้นสหรัฐฯ (NYSE/Nasdaq) ปี 2026 -- ตลาดปิดทั้งวัน ไม่มีการเทรด ----
           NYSE_HOLIDAYS_2026 = {
               '2026-01-01', '2026-01-19', '2026-02-16', '2026-04-03', '2026-05-25',
               '2026-06-19', '2026-07-03', '2026-09-07', '2026-11-26', '2026-12-25',
           }
-          if today in NYSE_HOLIDAYS_2026:
-              print(f'📅 {today} เป็นวันหยุดตลาดหุ้นสหรัฐฯ (ตลาดปิดทั้งวัน) -- ข้ามการคำนวณ % วันนี้ (ไม่บันทึกอะไรเลย)')
-              raise SystemExit(0)
 
-          # ---- 1) โหลดหุ้นทั้งหมดในพอร์ต (ต้องมีจำนวนหุ้น) ----
+          # ---- 1) โหลดหุ้นทั้งหมดในพอร์ต (ต้องมีจำนวนหุ้น) ครั้งเดียว ใช้ซ้ำได้ทุกวันที่คำนวณ ----
           stocks = sb_get('stocks?select=ticker,shares')
           stocks = [s for s in stocks if s.get('ticker') and float(s.get('shares') or 0) > 0]
           print(f'พบหุ้นในพอร์ต {len(stocks)} ตัว')
 
-          num, den, covered_value, total_value = 0.0, 0.0, 0.0, 0.0
-          skipped_no_data = []
-          skipped_outlier = []
+          def compute_and_save(date_obj):
+              """คำนวณ % เปลี่ยนแปลงพอร์ตของวัน date_obj แล้วบันทึกเข้า daily_pct (finalized=True)
+              คืนค่า True ถ้าบันทึกสำเร็จ, False ถ้าข้าม (ข้อมูลไม่พอ)"""
+              date_str = date_obj.isoformat()
+              num, den, covered_value, total_value = 0.0, 0.0, 0.0, 0.0
+              skipped_no_data, skipped_outlier = [], []
 
-          for s in stocks:
-              ticker = s['ticker']
-              shares = float(s['shares'])
+              for s in stocks:
+                  ticker, shares = s['ticker'], float(s['shares'])
 
-              # ---- 2) ราคาปิดของ "วันนี้" ----
-              today_rows = sb_get(f'price_history?ticker=eq.{ticker}&date=eq.{today}&select=price')
-              if not today_rows:
-                  skipped_no_data.append(ticker)
-                  continue
-              price_today = float(today_rows[0]['price'])
-              total_value += shares * price_today
+                  today_rows = sb_get(f'price_history?ticker=eq.{ticker}&date=eq.{date_str}&select=price')
+                  if not today_rows:
+                      skipped_no_data.append(ticker); continue
+                  price_today = float(today_rows[0]['price'])
+                  total_value += shares * price_today
 
-              # ---- 3) ราคาปิดของวันทำการก่อนหน้า (วันล่าสุดที่ < วันนี้) ----
-              prev_rows = sb_get(
-                  f'price_history?ticker=eq.{ticker}&date=lt.{today}&select=price,date'
-                  f'&order=date.desc&limit=1'
-              )
-              if not prev_rows:
-                  skipped_no_data.append(ticker)
-                  continue
-              prev_close = float(prev_rows[0]['price'])
-              if prev_close <= 0:
-                  skipped_no_data.append(ticker)
-                  continue
+                  prev_rows = sb_get(
+                      f'price_history?ticker=eq.{ticker}&date=lt.{date_str}&select=price,date'
+                      f'&order=date.desc&limit=1'
+                  )
+                  if not prev_rows:
+                      skipped_no_data.append(ticker); continue
+                  prev_close = float(prev_rows[0]['price'])
+                  if prev_close <= 0:
+                      skipped_no_data.append(ticker); continue
 
-              # ---- 4) safety net: ตัดตัวที่ขยับเกิน ±50% ใน 1 วัน (ราคาน่าจะพัง) ----
-              ticker_pct = (price_today - prev_close) / prev_close * 100
-              if abs(ticker_pct) > 50:
-                  skipped_outlier.append(f'{ticker}({ticker_pct:.1f}%)')
-                  continue
+                  ticker_pct = (price_today - prev_close) / prev_close * 100
+                  if abs(ticker_pct) > 50:
+                      skipped_outlier.append(f'{ticker}({ticker_pct:.1f}%)'); continue
 
-              num += shares * (price_today - prev_close)
-              den += shares * prev_close
-              covered_value += shares * price_today
+                  num += shares * (price_today - prev_close)
+                  den += shares * prev_close
+                  covered_value += shares * price_today
 
-          print(f'⏭️  ไม่มีข้อมูลราคาพอ ({len(skipped_no_data)}): {skipped_no_data}')
-          if skipped_outlier:
-              print(f'⚠️  ตัดออกเพราะราคาผิดปกติ ({len(skipped_outlier)}): {skipped_outlier}')
+              print(f'  ⏭️  ไม่มีข้อมูลราคาพอ ({len(skipped_no_data)}): {skipped_no_data}')
+              if skipped_outlier:
+                  print(f'  ⚠️  ตัดออกเพราะราคาผิดปกติ ({len(skipped_outlier)}): {skipped_outlier}')
 
-          if den <= 0 or total_value <= 0:
-              print('❌ ไม่มีข้อมูลพอจะคำนวณ % วันนี้ได้ (ข้าม ไม่บันทึก)')
-          elif covered_value / total_value < 0.6:
-              print(f'❌ ข้อมูลราคาครอบคลุมพอร์ตแค่ {covered_value/total_value*100:.1f}% (ต้อง >= 60%) ข้าม ไม่บันทึก')
-          else:
+              if den <= 0 or total_value <= 0:
+                  print(f'  ❌ {date_str}: ไม่มีข้อมูลพอจะคำนวณ % ได้ (ข้าม ไม่บันทึก)')
+                  return False
+              if covered_value / total_value < 0.6:
+                  print(f'  ❌ {date_str}: ข้อมูลราคาครอบคลุมพอร์ตแค่ {covered_value/total_value*100:.1f}% (ต้อง >= 60%) ข้าม')
+                  return False
+
               result = (num / den) * 100
               if abs(result) > 20:
-                  print(f'❌ % รวมพอร์ตออกมา {result:.2f}% ซึ่งดูผิดปกติเกินไป (เกิน ±20%) ข้าม ไม่บันทึก')
-              else:
-                  pct = round(result, 2)
-                  sb_upsert('daily_pct', {'date': today, 'pct': pct, 'finalized': True}, on_conflict='date')
-                  print(f'✅ บันทึก daily_pct: {today} = {pct}% (finalized)')
+                  print(f'  ❌ {date_str}: % รวมพอร์ตออกมา {result:.2f}% ผิดปกติเกินไป (เกิน ±20%) ข้าม')
+                  return False
+
+              pct = round(result, 2)
+              sb_upsert('daily_pct', {'date': date_str, 'pct': pct, 'finalized': True}, on_conflict='date')
+              print(f'  ✅ บันทึก daily_pct: {date_str} = {pct}% (finalized)')
+              return True
+
+          # ---- 2) คำนวณของ "วันนี้" ตามปกติ ----
+          if today.isoformat() in NYSE_HOLIDAYS_2026:
+              print(f'📅 {today} เป็นวันหยุดตลาดหุ้นสหรัฐฯ -- ข้ามวันนี้')
+          else:
+              print(f'== คำนวณวันนี้ {today.isoformat()} ==')
+              compute_and_save(today)
+
+          # ---- 3) BACKFILL: ย้อนดู 10 วันปฏิทินล่าสุด (ไม่รวมวันนี้) ----
+          # เผื่อ cron รอบก่อนๆ รันไม่สำเร็จ/ข้าม ไม่ว่าจะเพราะ Action ล่ม, price_history ยังมาไม่ทัน,
+          # หรือเหตุอื่นใดก็ตาม -- ทำให้แถวนั้นค้างเป็น pending (finalized=False) หรือหายไปเลยถาวร
+          # เช็คทุกวันทำการ (จ-ศ ไม่ใช่วันหยุดตลาด) ว่ามีแถว finalized=True หรือยัง ถ้ายังก็คำนวณย้อนหลังให้
+          print('== ตรวจสอบ backfill ย้อนหลัง 10 วัน ==')
+          check_start = (today - datetime.timedelta(days=10)).isoformat()
+          existing = sb_get(f'daily_pct?date=gte.{check_start}&date=lt.{today.isoformat()}&select=date,finalized')
+          finalized_dates = {r['date'] for r in existing if r.get('finalized')}
+
+          for offset in range(1, 11):
+              d = today - datetime.timedelta(days=offset)
+              if d.weekday() >= 5:  # เสาร์/อาทิตย์
+                  continue
+              if d.isoformat() in NYSE_HOLIDAYS_2026:
+                  continue
+              if d.isoformat() in finalized_dates:
+                  continue
+              print(f'  🔁 backfill {d.isoformat()} (ยังไม่ finalized)...')
+              compute_and_save(d)
           PYEOF
